@@ -1,2 +1,8 @@
-# MRP-tool
-MRP-tool*Material Requirements Planning (MRP) is a system for production planning, scheduling, and inventory control used to manage manufacturing processes. The core calculation of MRP
+# 📊 MRP Tool باستخدام Streamlit
+
+هذا التطبيق يسمح باستخراج وحفظ نتائج الـ MRP من ملفات Excel.
+
+## 🚀 كيفية التشغيل محليًا
+```bash
+pip install -r requirements.txt
+streamlit run app.py
