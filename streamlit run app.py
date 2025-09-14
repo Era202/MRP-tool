@@ -240,8 +240,8 @@ if uploaded_file:
             for idx, row in pivot_df.iterrows():
                 bg_color = "#f2f2f2" if idx%2==0 else "#ffffff"
                 html_table += f"<tr style='background-color:{bg_color};'>"
-                #html_table += f"<td>{row['Month']}</td>"
-				html_table += f"<td style='color:blue;'>{row['Month']}</td>"
+                html_table += f"<td>{row['Month']}</td>"
+				#html_table += f"<td style='color:blue;'>{row['Month']}</td>"
                 html_table += f"<td>{int(row.get('E',0))}</td>"
                 html_table += f"<td>{int(row.get('L',0))}</td>"
                 html_table += f"<td>{int(row.get('الإجمالي',0))}</td>"
@@ -306,6 +306,7 @@ if uploaded_file:
             )
 
             st.success("✅ تم إنشاء النسخة المضغوطة بنجاح، وجميع الشيتات موجودة داخل Excel")
+
 
 
 
