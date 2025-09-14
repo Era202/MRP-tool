@@ -236,7 +236,7 @@ if uploaded_file:
             # عرض HTML منسق RTL
             st.subheader("👌 توزيع الكميات الشهرية حسب نوع الأمر")
             html_table = "<table border='1' style='border-collapse: collapse; width:100%; text-align:center;'>"
-            html_table += "<tr style='background-color:#ffffff; color:white;'><th>الشهر</th><th>E</th><th>L</th><th>الإجمالي</th><th>E%</th><th>L%</th></tr>"
+            html_table += "<tr style='background-color:#ffffff; color:black;'><th>الشهر</th><th>E</th><th>L</th><th>الإجمالي</th><th>E%</th><th>L%</th></tr>"
             for idx, row in pivot_df.iterrows():
                 bg_color = "#f2f2f2" if idx%2==0 else "#ffffff"
                 html_table += f"<tr style='background-color:{bg_color};'>"
@@ -305,3 +305,4 @@ if uploaded_file:
             )
 
             st.success("✅ تم إنشاء النسخة المضغوطة بنجاح، وجميع الشيتات موجودة داخل Excel")
+
