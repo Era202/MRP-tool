@@ -8,7 +8,7 @@ import plotly.express as px
 
 # إعداد الصفحة
 st.set_page_config(page_title="🔥 MRP Tool", page_icon="📂", layout="wide")
-st.title("📂 برنامج استخراج وحفظ نتائج الـ MRP")
+st.subheader("📂 برنامج استخراج وحفظ نتائج الـ MRP")
 # صندوق التعريف القابل للطي
 with st.expander("📘 تعريف البرنامج"):
     with open("README.md", "r", encoding="utf-8") as f:
@@ -364,5 +364,6 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+
 
 
