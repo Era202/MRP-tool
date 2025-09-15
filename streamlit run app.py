@@ -354,4 +354,15 @@ if uploaded_file:
             )
 
             st.success("✅ تم إنشاء النسخة المضغوطة بنجاح، وجميع الشيتات موجودة داخل Excel")
+# --- التذييل ---
+st.markdown(
+    """
+    <hr>
+    <div style="text-align:center; direction:rtl; font-size:14px; color:gray;">
+        ✨ تم التطوير بواسطة <b>م / رضا رشدي</b> – جميع الحقوق محفوظة © 2025 ✨
+    </div>
+    """,
+    unsafe_allow_html=True
+)
+
 
