@@ -9,6 +9,11 @@ import plotly.express as px
 # إعداد الصفحة
 st.set_page_config(page_title="🔥 MRP Tool", page_icon="📂", layout="wide")
 st.title("📂 برنامج استخراج وحفظ نتائج الـ MRP")
+# صندوق التعريف القابل للطي
+with st.expander("📘 تعريف البرنامج"):
+    with open("README.md", "r", encoding="utf-8") as f:
+        readme_content = f.read()
+    st.markdown(readme_content, unsafe_allow_html=True)
 
 uploaded_file = st.file_uploader("📂  اختر ملف الخطة الشهرية  Excel", type=["xlsx"])
 
@@ -349,3 +354,4 @@ if uploaded_file:
             )
 
             st.success("✅ تم إنشاء النسخة المضغوطة بنجاح، وجميع الشيتات موجودة داخل Excel")
+
