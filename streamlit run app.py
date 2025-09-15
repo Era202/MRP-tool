@@ -7,7 +7,7 @@ import calendar
 import plotly.express as px
 
 # إعداد الصفحة
-st.set_page_config(page_title="📊 MRP Tool", page_icon="📂", layout="wide")
+st.set_page_config(page_title="🔥 MRP Tool", page_icon="📂", layout="wide")
 st.title("📂 برنامج استخراج وحفظ نتائج الـ MRP")
 
 uploaded_file = st.file_uploader("📂  اختر ملف الخطة الشهرية  Excel", type=["xlsx"])
@@ -22,6 +22,40 @@ if uploaded_file:
         plan_df = xls.parse("plan")
         component_df = xls.parse("Component")
         mrp_df = xls.parse("MRP Contor") if "MRP Contor" in xls.sheet_names else pd.DataFrame()
+        # 1. التحقق من وجود جميع الأوراق المطلوبة
+        required_sheets = ["plan", "Component"]
+        missing_sheets = [sheet for sheet in required_sheets if sheet not in xls.sheet_names]
+        
+        if missing_sheets:
+            st.error(f"❌ الملف لا يحتوي على الأوراق المطلوبة: {', '.join(missing_sheets)}")
+            st.stop()
+            
+        plan_df = xls.parse("plan")
+        component_df = xls.parse("Component")
+        mrp_df = xls.parse("MRP Contor") if "MRP Contor" in xls.sheet_names else pd.DataFrame()
+
+        # 2. التحقق من صحة البيانات الأساسية
+        if plan_df.empty:
+            st.error("❌ جدول الخطة فارغ. يرجى التحقق من الملف.")
+            st.stop()
+
+        if component_df.empty:
+            st.error("❌ جدول المكونات فارغ. يرجى التحقق من الملف.")
+            st.stop()
+
+        # 3. التحقق من الأعمدة الأساسية في جدول الخطة:
+        required_plan_columns = ["Material", "Material Description", "Order Type"]
+        missing_plan_columns = [col for col in required_plan_columns if col not in plan_df.columns]
+        if missing_plan_columns:
+            st.error(f"❌ جدول الخطة لا يحتوي على الأعمدة المطلوبة: {', '.join(missing_plan_columns)}")
+            st.stop()
+
+        # 4. التحقق من الأعمدة الأساسية في جدول المكونات:
+        required_component_columns = ["Material", "Component", "Component Quantity"]
+        missing_component_columns = [col for col in required_component_columns if col not in component_df.columns]
+        if missing_component_columns:
+            st.error(f"❌ جدول المكونات لا يحتوي على الأعمدة المطلوبة: {', '.join(missing_component_columns)}")
+            st.stop()
 
         # -------------------------------
         # تجهيز البيانات الأساسية
@@ -112,6 +146,13 @@ if uploaded_file:
                 how="left"
             )
 
+            # إعادة ترتيب الأعمدة بحيث MRP Contor يكون العمود الثالث
+            cols = pivot_by_date.columns.tolist()
+            fixed_order = ["Component", "Component Description", "MRP Contor", "Component UoM"]
+            other_cols = [c for c in cols if c not in fixed_order]
+            pivot_by_date = pivot_by_date[fixed_order + other_cols]
+
+        # تنسيق أسماء الأعمدة (التواريخ تبقى dd mmm)
         pivot_by_date.columns = [
             col.strftime("%d %b") if isinstance(col, pd.Timestamp) else col
             for col in pivot_by_date.columns
@@ -233,14 +274,14 @@ if uploaded_file:
             pivot_df["MonthOrder"] = pivot_df["Month"].map(month_order)
             pivot_df = pivot_df.sort_values("MonthOrder").drop(columns="MonthOrder")
 
-            # عرض HTML منسق RTL
+                       # عرض HTML منسق RTL
             st.subheader("👌 توزيع الكميات الشهرية حسب نوع الأمر")
             html_table = "<table border='1' style='border-collapse: collapse; width:100%; text-align:center;'>"
             html_table += "<tr style='background-color:#d9d9d9; color:blue;'><th>الشهر</th><th>E</th><th>L</th><th>الإجمالي</th><th>E%</th><th>L%</th></tr>"
+
             for idx, row in pivot_df.iterrows():
-                bg_color = "#f2f2f2" if idx%2==0 else "#ffffff"
+                bg_color = "#f2f2f2" if idx % 2 == 0 else "#ffffff"
                 html_table += f"<tr style='background-color:{bg_color};'>"
-                #html_table += f"<td>{row['Month']}</td>"
                 html_table += f"<td style='color:blue;'>{row['Month']}</td>"
                 html_table += f"<td>{int(row.get('E',0))}</td>"
                 html_table += f"<td>{int(row.get('L',0))}</td>"
@@ -248,8 +289,10 @@ if uploaded_file:
                 html_table += f"<td>{row.get('E%','')}</td>"
                 html_table += f"<td>{row.get('L%','')}</td>"
                 html_table += "</tr>"
+
             html_table += "</table>"
             st.markdown(f"<div style='direction:rtl;'>{html_table}</div>", unsafe_allow_html=True)
+
 
             st.subheader("👌 رسم بياني للكميات الشهرية✅")
             numeric_cols = ["E", "L", "الإجمالي"]
@@ -299,25 +342,10 @@ if uploaded_file:
 
             st.subheader("🔥 تحميل النسخة الكاملة مضغوطة")
             st.download_button(
-                label=" 🔥 تحميل الملف المضغوط",
+                label=" 📊 تحميل الملف المضغوط",
                 data=zip_buffer,
                 file_name=f"All_Component_Results_{current_date}.zip",
                 mime="application/zip"
             )
 
             st.success("✅ تم إنشاء النسخة المضغوطة بنجاح، وجميع الشيتات موجودة داخل Excel")
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
