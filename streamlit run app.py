@@ -14,8 +14,14 @@ with st.expander("📘 تعريف البرنامج"):
     with open("README.md", "r", encoding="utf-8") as f:
         readme_content = f.read()
     st.markdown(readme_content, unsafe_allow_html=True)
+st.markdown(
+    "<p style='font-size:16px; font-weight:bold;'>📂 اختر ملف الخطة الشهرية Excel</p>",
+    unsafe_allow_html=True
+)
 
-uploaded_file = st.file_uploader("📂  اختر ملف الخطة الشهرية  Excel", type=["xlsx"])
+uploaded_file = st.file_uploader("", type=["xlsx"])
+
+#uploaded_file = st.file_uploader("📂  اختر ملف الخطة الشهرية  Excel", type=["xlsx"])
 
 if uploaded_file:
     with st.spinner("⏳ جاري معالجة البيانات ----- انتظر قليلا.....⏳"):
@@ -364,6 +370,7 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+
 
 
 
