@@ -365,11 +365,12 @@ st.markdown(
     """
     <hr>
     <div style="text-align:center; direction:rtl; font-size:14px; color:gray;">
-        ✨ تم التطوير بواسطة <b>م / رضا رشدي</b> – جميع الحقوق محفوظة © 2025 ✨
+        ✨ تم التنفيذ بواسطة <b>م / رضا رشدي</b> – جميع الحقوق محفوظة © 2025 ✨
     </div>
     """,
     unsafe_allow_html=True
 )
+
 
 
 
