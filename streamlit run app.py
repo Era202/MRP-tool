@@ -108,7 +108,7 @@ if uploaded_file:
 
         st.markdown(f"""
         <div style="direction:rtl; text-align:right; font-size:20px;">
-        <span style="font-size:22px; color:#1976d2;">📌 <b>ملخص نتائج الخطة مع تحياتي م / رضا رشدي</b></span>
+        <span style="font-size:22px; color:#1976d2;">📌 <b>ملخص نتائج الخطة </b></span>
         <br><br>
         <ul style="list-style-type:none; padding-right:0;">
 
@@ -370,6 +370,7 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+
 
 
 
