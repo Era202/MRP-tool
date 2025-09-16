@@ -10,10 +10,10 @@ import plotly.express as px
 st.set_page_config(page_title="🔥 MRP Tool", page_icon="📂", layout="wide")
 st.subheader("📂 برنامج استخراج وحفظ نتائج الـ MRP")
 # صندوق التعريف القابل للطي
-with st.expander("📘 تعريف البرنامج"):
-    with open("README.md", "r", encoding="utf-8") as f:
-        readme_content = f.read()
-    st.markdown(readme_content, unsafe_allow_html=True)
+#with st.expander("📘 تعريف البرنامج"):
+ #   with open("README.md", "r", encoding="utf-8") as f:
+  #      readme_content = f.read()
+   # st.markdown(readme_content, unsafe_allow_html=True)
 st.markdown(
     "<p style='font-size:16px; font-weight:bold;'>📂 اختر ملف الخطة الشهرية Excel</p>",
     unsafe_allow_html=True
@@ -370,6 +370,7 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+
 
 
 
