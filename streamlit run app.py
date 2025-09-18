@@ -1,4 +1,4 @@
-#### reda
+
 import streamlit as st
 import pandas as pd
 import datetime
@@ -284,9 +284,13 @@ if uploaded_file:
             # استبعاد عمود "الإجمالي" لو موجود
             numeric_cols = [c for c in pivot_df.columns if c not in ["Month", "الإجمالي"]]
 
-            # تحويل الأعمدة المختارة إلى أرقام (لو فيها نصوص تتحول NaN)
+            # اختيار الأعمدة الرقمية فقط
+            numeric_cols = [c for c in numeric_cols if pd.api.types.is_numeric_dtype(pivot_df[c])]
+
+            # تحويل القيم لأرقام (في حالة وجود نصوص تتحول NaN)
             pivot_df[numeric_cols] = pivot_df[numeric_cols].apply(pd.to_numeric, errors="coerce")
 
+            # رسم العمودى
             fig = px.bar(
                 pivot_df,
                 x="Month",
