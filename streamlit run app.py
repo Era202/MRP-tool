@@ -185,8 +185,23 @@ if uploaded_file:
             fill_value=0
         ).reset_index()
 
+        if not mrp_df.empty:
+            pivot_by_order = pd.merge(
+                pivot_by_order,
+                mrp_df[["Component", "MRP Contor"]],
+                on="Component",
+                how="left"
+            )
+
+            # إعادة ترتيب الأعمدة بحيث MRP Contor يكون العمود الثالث
+            cols = pivot_by_order.columns.tolist()
+            fixed_order = ["Component", "Component Description", "MRP Contor", "Component UoM"]
+            other_cols = [c for c in cols if c not in fixed_order]
+            pivot_by_order = pivot_by_order[fixed_order + other_cols]
+
+        # تنسيق أسماء الأعمدة (التاريخ + Order Type)
         pivot_by_order.columns = [
-            f"{col[1][0]} - {col[0].strftime('%d %b')}" if isinstance(col, tuple) and isinstance(col[0], pd.Timestamp)
+            f"{col[1]} - {col[0].strftime('%d %b')}" if isinstance(col, tuple) and isinstance(col[0], pd.Timestamp)
             else col if isinstance(col, str) else col[0]
             for col in pivot_by_order.columns
         ]
@@ -354,6 +369,7 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+
 
 
 
