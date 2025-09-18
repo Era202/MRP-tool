@@ -1,3 +1,4 @@
+#### reda
 import streamlit as st
 import pandas as pd
 import datetime
@@ -190,33 +191,6 @@ if uploaded_file:
             for col in pivot_by_order.columns
         ]
 
-        # -------------------------------
-        # Component_in_BOMs
-        # -------------------------------
-   #     if not mrp_df.empty:
-    #        merged_df = merged_df.merge(mrp_df[["Component", "MRP Contor"]], on="Component", how="left")
-     #   component_bom_map = merged_df.groupby(["MRP Contor", "Component", "Material"]).size().reset_index(name="Flag")
-      #  component_bom_pivot = component_bom_map.pivot_table(
-       #     index=["MRP Contor", "Component"],
-        #    columns="Material",
-         #   values="Flag",
-          #  aggfunc="size",
-           # fill_value=0
-         #  ).applymap(lambda x: "✔️" if x > 0 else "")
-             
-#        component_bom_map = merged_df.groupby(
- #           ["MRP Contor", "Component", "Material"]
-  #      )["Planned Quantity"].sum().reset_index(name="Planned Quantity")
-
-   #     component_bom_pivot = component_bom_map.pivot_table(
-    #        index=["MRP Contor", "Component"],
-     #       columns="Material",
-      #      values="Planned Quantity",
-       #     aggfunc="sum",
-        #    fill_value=0
-        #)
-
-	
          # -------------------------------
          # Component_in_BOMs
          # -------------------------------
@@ -287,7 +261,7 @@ if uploaded_file:
 
                        # عرض HTML منسق RTL
             st.subheader("👌 توزيع الكميات الشهرية حسب نوع الأمر")
-            html_table = "<table border='1' style='border-collapse: collapse; width:100%; text-align:center;'>"
+            html_table = "<table border='1' style='border-collapse: collapse; width:100%; text-align:center; color:black;'>"
             html_table += "<tr style='background-color:#d9d9d9; color:blue;'><th>الشهر</th><th>E</th><th>L</th><th>الإجمالي</th><th>E%</th><th>L%</th></tr>"
 
             for idx, row in pivot_df.iterrows():
@@ -306,8 +280,12 @@ if uploaded_file:
 
 
             st.subheader("👌 رسم بياني للكميات الشهرية✅")
-            numeric_cols = ["E", "L", "الإجمالي"]
-            numeric_cols = [c for c in numeric_cols if c in pivot_df.columns]
+
+            # استبعاد عمود "الإجمالي" لو موجود
+            numeric_cols = [c for c in pivot_df.columns if c not in ["Month", "الإجمالي"]]
+
+            # تحويل الأعمدة المختارة إلى أرقام (لو فيها نصوص تتحول NaN)
+            pivot_df[numeric_cols] = pivot_df[numeric_cols].apply(pd.to_numeric, errors="coerce")
 
             fig = px.bar(
                 pivot_df,
@@ -315,8 +293,10 @@ if uploaded_file:
                 y=numeric_cols,
                 barmode="group",
                 text_auto=True,
-                title="توزيع الكميات حسب نوع الأمر"
+                title="توزيع الكميات حسب نوع الأمر",
+                template="streamlit"
             )
+
             st.plotly_chart(fig, use_container_width=True)
 
 
@@ -370,10 +350,3 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
-
-
-
-
-
-
-
