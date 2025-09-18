@@ -178,7 +178,7 @@ if uploaded_file:
         )["Required Component Quantity"].sum().reset_index()
 
         pivot_by_order = result_order.pivot_table(
-            index=["Component", "Component Description", "Component UoM","MRP Contor"],
+            index=["Component", "Component Description", "Component UoM", "MRP Contor"],  # 🔹 تمت إضافة "MRP Contor" هنا
             columns=["Date", "Order Type"],
             values="Required Component Quantity",
             aggfunc="sum",
@@ -354,4 +354,5 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+
 
