@@ -13,7 +13,7 @@ st.markdown(
     """
     <style>
     .stSubheader {
-        font-size:14px !important;
+        font-size:10px !important;
     }
     </style>
     """,
@@ -365,6 +365,7 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+
 
 
 
