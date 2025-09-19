@@ -13,16 +13,16 @@ st.markdown(
     """
     <style>
     .stSubheader {
-        font-size:10px !important;
+        font-size:9px !important;
     }
     </style>
     """,
     unsafe_allow_html=True
 )
-st.markdown("📂 برنامج استخراج وحفظ نتائج الـ MRP")
+st.subheader("📂 برنامج تحليلوعرض & استخراج وحفظ نتائج الـ MRP")
 # صندوق التعريف القابل للطي
 #with st.expander("📘 تعريف البرنامج"):
- #   with open("README.md", "r", encoding="utf-8") as f:
+ #   with open("README.md", "r", encoding="utf-6") as f:
   #      readme_content = f.read()
    # st.markdown(readme_content, unsafe_allow_html=True)
 st.markdown(
@@ -365,6 +365,7 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+
 
 
 
