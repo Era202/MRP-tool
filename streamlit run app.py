@@ -13,7 +13,7 @@ st.markdown(
     """
     <style>
     .stSubheader {
-        font-size:9px !important;
+        font-size:8px !important;
     }
     </style>
     """,
@@ -26,17 +26,14 @@ st.subheader("📂 برنامج تحليلوعرض & استخراج وحفظ ن�
   #      readme_content = f.read()
    # st.markdown(readme_content, unsafe_allow_html=True)
 st.markdown(
-    "<p style='font-size:16px; font-weight:bold;'>📂 اختر ملف الخطة الشهرية Excel</p>",
+    "<p style='font-size:12px; font-weight:bold;'>📂 اختر ملف الخطة الشهرية Excel</p>",
     unsafe_allow_html=True
 )
-
 uploaded_file = st.file_uploader("", type=["xlsx"])
-
-#uploaded_file = st.file_uploader("📂  اختر ملف الخطة الشهرية  Excel", type=["xlsx"])
-
+#===================================#uploaded_file = st.file_uploader("📂  اختر ملف الخطة الشهرية  Excel", type=["xlsx"])
 if uploaded_file:
     with st.spinner("⏳ جاري معالجة البيانات ----- انتظر قليلا.....⏳"):
-
+#=======================================
         # -------------------------------
         # قراءة شيتات Excel
         # -------------------------------
@@ -365,6 +362,7 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+
 
 
 
