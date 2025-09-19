@@ -13,13 +13,13 @@ st.markdown(
     """
     <style>
     .stSubheader {
-        font-size:8px !important;
+        font-size:10px !important;
     }
     </style>
     """,
     unsafe_allow_html=True
 )
-st.subheader("📂 برنامج تحليل وعرض & استخراج وحفظ نتائج الـ MRP")
+st.subheader("📂 برنامج أستخراج وحفظ نتائج الـ MRP")
 # صندوق التعريف القابل للطي
 #with st.expander("📘 تعريف البرنامج"):
  #   with open("README.md", "r", encoding="utf-6") as f:
@@ -362,6 +362,7 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+
 
 
 
