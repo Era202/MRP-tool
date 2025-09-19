@@ -19,7 +19,7 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
-st.subheader("📂 برنامج تحليلوعرض & استخراج وحفظ نتائج الـ MRP")
+st.subheader("📂 برنامج تحليل وعرض & استخراج وحفظ نتائج الـ MRP")
 # صندوق التعريف القابل للطي
 #with st.expander("📘 تعريف البرنامج"):
  #   with open("README.md", "r", encoding="utf-6") as f:
@@ -362,6 +362,7 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+
 
 
 
