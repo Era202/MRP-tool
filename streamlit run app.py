@@ -527,7 +527,7 @@ if uploaded_file:
 
             # إعادة ترتيب الأعمدة: للتأكد MRP Contor أول عمود
             cols_final = ["MRP Contor"] + [c for c in bom_levels_df.columns if c != "MRP Contor"]
-            bom_levels_df = bom_levels_df.drop_duplicates()
+            #bom_levels_df = bom_levels_df.drop_duplicates()
             bom_levels_df = bom_levels_df[cols_final]
 
 
@@ -572,5 +572,6 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+
 
 
