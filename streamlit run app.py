@@ -467,13 +467,16 @@ if uploaded_file:
                 while not children.empty:
                     code = current["Component"]
                     desc = current.get("Component Description", "")
-                    path.append((code, desc))
+                    # ✅ نتأكد ألا نكرر نفس الـ Level1_Code
+                    if code != parent:
+                        path.append((code, desc))
                     children = component_df[component_df["Material"] == code]
                     if not children.empty:
                         current = children.iloc[0]
                     else:
                         break
                 return path
+
 
             rows = []
             max_depth = 1
@@ -568,3 +571,4 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+
