@@ -1,19 +1,19 @@
-#✅ إضافة    BOM_Level1_Expanded
+# streamlit_mrp_priority.py
+# ✅ إضافة BOM_Level1_Expanded مع أولوية الوحدة "القطعة"
 import streamlit as st
 import pandas as pd
 import datetime
 from io import BytesIO
-import zipfile
 import calendar
 import plotly.express as px
+
 # ==========================================================
 # دالة حساب الـ MRP متعدد المستويات (Multi-Level MRP)
-# تقوم بحساب المتطلبات الإجمالية لجميع المستويات الهرمية (Roll-Down)
+# ✅ تم تعديل هذه الدالة لتطبيق أولوية الوحدة "القطعة"
 # ==========================================================
 def calculate_multi_level_mrp(plan_df, component_df):
     
     # 1. تجهيز الـ BOMs لتحديد المكونات المصنعة داخلياً (التي تحتاج MRP)
-    # هي المكونات التي تظهر كـ "Material" (أب) في أي مكان في الـ BOMs
     manufactured_components = set(component_df["Material"].unique())
     
     # 2. تجهيز الخطة الأولية كطلب (Initial Demand)
@@ -35,10 +35,8 @@ def calculate_multi_level_mrp(plan_df, component_df):
     current_demand = demand_df.rename(columns={'Material': 'Parent'})
     
     # بدء عملية التكرار (Roll-Down)
-    # تستمر الحلقة طالما لا تزال هناك مكونات مصنعة تحتاج إلى تحليل MRP
     while not current_demand.empty:
         
-        # دمج متطلبات المستوى الحالي (current_demand) مع مكوناته (الأبناء) في BOM
         merged = pd.merge(
             current_demand, 
             component_df, 
@@ -47,29 +45,45 @@ def calculate_multi_level_mrp(plan_df, component_df):
             how='inner'
         )
 
-        # حساب الكمية المطلوبة للمكونات الأبناء (الاحتياج الإجمالي = طلب الأب * كمية مكونه في الـ BOM)
         merged['Calculated Quantity'] = merged['Required Quantity'] * merged['Component Quantity']
         
-        # تجميع متطلبات المكونات الأبناء (المستوى التالي)
-        requirements_for_level = merged.groupby(
-            ["Component", "Component Description", "Component UoM", "Date"]
-        )['Calculated Quantity'].sum().reset_index()
+        # *******************************************************************
+        # ✅ تطبيق أولوية "القطعة" قبل التجميع في كل مستوى
+        # *******************************************************************
         
+        # 1. ترتيب البيانات: إعطاء الأولوية للوحدة 'القطعة' (القيمة 0)
+        merged.loc[:, 'Priority_Order'] = merged['Component UoM'].apply(lambda x: 0 if x == 'القطعة' else 1)
+        # *******************************************************************        
+        # 2. تجميع متطلبات المكونات الأبناء
+        # *******************************************************************
+
+        requirements_for_level = merged.sort_values(
+            ['Date', 'Component', 'Priority_Order']
+        ).groupby(
+            ["Date", "Component", "Component UoM"] # ✅ التجميع بناءً على المكون والتاريخ والوحدة
+        ).agg(
+            {
+                'Calculated Quantity': 'sum', # جمع الكميات المطلوبة
+                'Component Description': 'first',
+            }
+        ).reset_index()        
         requirements_for_level = requirements_for_level.rename(
             columns={'Calculated Quantity': 'Required Component Quantity'}
         )
         
+        # حذف عمود الأولوية المؤقت
+        requirements_for_level = requirements_for_level.drop(columns=['Priority_Order'], errors='ignore')
+
+        # *******************************************************************
+        
         # إضافة متطلبات هذا المستوى إلى جدول المتطلبات النهائية
         final_requirements = pd.concat([final_requirements, requirements_for_level])
 
-        # *******************************************************************
         # تجهيز الطلب (Demand) للمستوى التالي:
-        # 1. تحديد المكونات الأبناء (Component) التي هي نفسها مكونات مصنعة (Manufactured Components)
         next_level_demand_components = requirements_for_level[
             requirements_for_level['Component'].isin(manufactured_components)
         ]
         
-        # 2. إعادة تسمية الأعمدة ليصبحوا "آباء" للمستوى التالي
         current_demand = next_level_demand_components.rename(
             columns={'Component': 'Parent', 'Required Component Quantity': 'Required Quantity'}
         )
@@ -80,36 +94,28 @@ def calculate_multi_level_mrp(plan_df, component_df):
         if current_demand.empty:
             break
             
-    # التجميع النهائي: جمع كل متطلبات المكونات (من جميع المستويات) لنفس المكون والتاريخ
+    # التجميع النهائي: جمع كل متطلبات المكونات
     final_mrp_result = final_requirements.groupby(['Component', 'Component Description', 'Component UoM', 'Date'])['Required Component Quantity'].sum().reset_index()
     return final_mrp_result
 
 # إعداد الصفحة
 st.set_page_config(page_title="🔥 MRP Tool", page_icon="📂", layout="wide")
 st.subheader("📂 برنامج أستخراج وحفظ نتائج الـ MRP Need_By_Date Multi level")
-# صندوق التعريف القابل للطي
-#with st.expander("📘 تعريف البرنامج"):
- #   with open("README.md", "r", encoding="utf-6") as f:
-  #      readme_content = f.read()
-   # st.markdown(readme_content, unsafe_allow_html=True)
 st.markdown(
     "<p style='font-size:1.0em; font-weight:bold;'>💡 اختر ملف الخطة الشهرية Excel</p>",
     unsafe_allow_html=True
 )
 
 uploaded_file = st.file_uploader("", type=["xlsx"])
-        # *******************************************************************
-#uploaded_file = st.file_uploader("📂  اختر ملف الخطة الشهرية  Excel", type=["xlsx"])
+
 if uploaded_file:
     with st.spinner("⏳ جاري معالجة البيانات ----- انتظر قليلا.....⏳"):
-        # *******************************************************************
+        
         # -------------------------------
         # قراءة شيتات Excel
         # -------------------------------
         xls = pd.ExcelFile(uploaded_file, engine='openpyxl')
-        plan_df = xls.parse("plan")
-        component_df = xls.parse("Component")
-        mrp_df = xls.parse("MRP Contor") if "MRP Contor" in xls.sheet_names else pd.DataFrame()
+        
         # 1. التحقق من وجود جميع الأوراق المطلوبة
         required_sheets = ["plan", "Component"]
         missing_sheets = [sheet for sheet in required_sheets if sheet not in xls.sheet_names]
@@ -139,10 +145,11 @@ if uploaded_file:
             st.stop()
 
         # 4. التحقق من الأعمدة الأساسية في جدول المكونات:
-        required_component_columns = ["Material", "Component", "Component Quantity"]
+        # ✅ تم إضافة "Component UoM" كعمود مطلوب
+        required_component_columns = ["Material", "Component", "Component Quantity", "Component UoM"]
         missing_component_columns = [col for col in required_component_columns if col not in component_df.columns]
         if missing_component_columns:
-            st.error(f"❌ جدول المكونات لا يحتوي على الأعمدة المطلوبة: {', '.join(missing_component_columns)}")
+            st.error(f"❌ جدول المكونات لا يحتوي على الأعمدة المطلوبة: {', '.join(missing_component_columns)}. يجب إضافة عمود الوحدة (Component UoM).")
             st.stop()
 
         # *******************************************************************
@@ -159,12 +166,10 @@ if uploaded_file:
         
         # إزالة الصفوف ذات الكمية المخططة الصفرية
         merged_df = merged_df[merged_df["Planned Quantity"] > 0]
-        # *******************************************************************
-        # حساب Multi-Level MRP (Need_By_Date Multi level) - (الحساب الجديد)
-        # *******************************************************************
-        #st.info("🔄 جاري إجراء حساب الـ MRP متعدد المستويات (Multi-Level) لجميع المكونات المصنعة داخلياً والمواد الخام...")
         
-        # استدعاء الدالة الجديدة
+        # *******************************************************************
+        # حساب Multi-Level MRP
+        # *******************************************************************
         result_date_multi = calculate_multi_level_mrp(plan_df, component_df)
 
         # -------------------------------
@@ -205,13 +210,11 @@ if uploaded_file:
 
         
         # *******************************************************************
-        # 💡 التعديل الجديد: دمج نتائج الـ MRP مع جدول MRP Contor
+        # دمج نتائج الـ MRP مع جدول MRP Contor
         # *******************************************************************
         if not mrp_df.empty and "MRP Contor" in mrp_df.columns and "Component" in mrp_df.columns:
-            # التأكد من دمج الأعمدة المطلوبة فقط وتجنب تكرار أسماء الأعمدة الوصفية
             mrp_contor_cols = mrp_df[["Component", "MRP Contor"]].drop_duplicates()
             
-            # الدمج بناءً على عمود "Component"
             result_date_multi = pd.merge(
                 result_date_multi, 
                 mrp_contor_cols, 
@@ -220,14 +223,13 @@ if uploaded_file:
             )
         else:
             st.warning("⚠️ لم يتم العثور على ورقة 'MRP Contor' أو الأعمدة المطلوبة بها، لن يتم إضافة عمود 'MRP Contor'.")
-            result_date_multi["MRP Contor"] = "N/A" # إضافة عمود فارغ في حالة عدم توفر البيانات
+            result_date_multi["MRP Contor"] = "N/A" 
 
-        # تحويل عمود التاريخ إلى صيغة نصية (YYYY-MM-DD)
+        # تحويل عمود التاريخ إلى صيغة نصية (dd mmm)
         result_date_multi['Date'] = result_date_multi['Date'].dt.strftime("%d %b")
         
         # إنشاء الجدول المحوري
         pivot_by_date_multi = result_date_multi.pivot(
-            # تم إضافة "MRP Contor" إلى أعمدة الـ Index لتظهر كأول عمود وصفي بعد بيانات المكون
             index=["Component", "Component Description", "Component UoM", "MRP Contor"],
             columns="Date",
             values="Required Component Quantity"
@@ -366,7 +368,7 @@ if uploaded_file:
 
 
         # *******************************************************************
-        # جدول الكميات الشهرية + الرسم البياني
+        # جدول الكميات الشهرية + الرسم البياني (لم يتم المساس بهذا الجزء)
         # *******************************************************************
         date_cols = [c for c in plan_df.columns if isinstance(c, (datetime.datetime, pd.Timestamp))]
         if date_cols:
@@ -442,7 +444,7 @@ if uploaded_file:
 
         # *******************************************************************
         # تحويل رؤوس الأعمدة التي تحتوي على تواريخ إلى صيغة مختصرة "يوم شهر"
-            # *******************************************************************
+        # *******************************************************************
         plan_df.columns = [
             col.strftime("%d %b") if isinstance(col, (datetime.datetime, pd.Timestamp)) else col
             for col in plan_df.columns
@@ -450,44 +452,81 @@ if uploaded_file:
 
 
         # *******************************************************************
-        # زر إنشاء النسخة المضغوطة
+        # زر إنشاء النسخة المضغوطة وحفظها في session_state
         # *******************************************************************
-        if st.button("💾  Excel  حفظ الملف كـ "):
+        if st.button("💾 Excel حفظ الملف كـ "):
             current_date = datetime.datetime.now().strftime("%d_%b_%Y")
+            
+# -------------------------------
+            # ✅ تجهيز شيت "BOM_Level1_Expanded" بالمنطق التكراري لاستخراج جميع الفروع
+            # -------------------------------
+            
+            def generate_bom_paths_recursive(bom_df, current_node, current_path, all_paths):
+                """
+                تستخرج جميع مسارات الـ BOM بشكل تكراري (شاملة الفروع المتعددة).
+                """
+                
+                # إيجاد جميع الأبناء المباشرين للعقدة الحالية (Material)
+                children = bom_df[bom_df["Material"] == current_node]
 
-            # -------------------------------
-            # تجهيز شيت "BOM_Level1_Expanded" مع عمود الكنترول
-            # -------------------------------
-            def get_deep_path(component_df, parent):
-                children = component_df[component_df["Material"] == parent]
                 if children.empty:
-                    return []
-                path = []
-                current = children.iloc[0]
-                while not children.empty:
-                    code = current["Component"]
-                    desc = current.get("Component Description", "")
-                    # ✅ نتأكد ألا نكرر نفس الـ Level1_Code
-                    if code != parent:
-                        path.append((code, desc))
-                    children = component_df[component_df["Material"] == code]
-                    if not children.empty:
-                        current = children.iloc[0]
+                    # إذا لم يكن هناك أبناء، فهذا فرع مكتمل (مادة خام)
+                    all_paths.append(current_path)
+                    return
+
+                # استدعاء الدالة بشكل تكراري لكل طفل
+                for _, child_row in children.iterrows():
+                    child_component = child_row["Component"]
+                    child_desc = child_row.get("Component Description", "")
+                    
+                    new_level = (child_component, child_desc)
+                    new_path = current_path + [new_level]
+
+                    # منع الحلقات التكرارية (Loop prevention)
+                    if child_component not in [p[0] for p in current_path]:
+                        generate_bom_paths_recursive(bom_df, child_component, new_path, all_paths)
                     else:
-                        break
-                return path
+                        # إنهاء المسار عند ظهور حلقة تكرارية
+                        all_paths.append(new_path)
 
 
+            # 1. تحديد المكونات التي تبدأ منها المسارات (المستوى 1)
+            # نستخدم Component UoM لأن عمود Hierarchy Level قد لا يكون موجوداً أو موثوقاً به في كل الحالات
+            if "Hierarchy Level" in component_df.columns:
+                 level1_starters = component_df[component_df["Hierarchy Level"] == 1]
+            else:
+                 # إذا لم يكن عمود Hierarchy Level موجوداً، نعتبر كل الآباء المحتملين كبداية
+                 level1_starters = component_df[['Material', 'Material Description']].drop_duplicates()
+                 level1_starters = level1_starters.rename(columns={'Material': 'Component', 'Material Description': 'Component Description'})
+
+            unique_level1_codes = level1_starters["Component"].unique()
+            
             rows = []
-            max_depth = 1
-            for _, row in component_df.iterrows():
-                if "Hierarchy Level" in row and row["Hierarchy Level"] == 1:
-                    level1_code = row["Component"]
-                    level1_desc = row.get("Component Description", "")
-                    path = [(level1_code, level1_desc)] + get_deep_path(component_df, level1_code)
-                    rows.append(path)
+            max_depth = 0
+            
+            # 2. توليد المسارات لجميع فروع كل مكون مستوى أول
+            for level1_code in unique_level1_codes:
+                # نحتاج وصف المكون للمستوى الأول
+                desc_row = component_df[component_df["Component"] == level1_code]
+                level1_desc = desc_row.iloc[0].get("Component Description", "") if not desc_row.empty else ""
+                
+                initial_path = [(level1_code, level1_desc)]
+                paths_from_starter = []
+                
+                # بدء الاستدعاء التكراري
+                generate_bom_paths_recursive(component_df, level1_code, initial_path, paths_from_starter)
+                
+                # إضافة المسارات المولدة إلى القائمة الرئيسية
+                if paths_from_starter:
+                    rows.extend(paths_from_starter)
+                else:
+                    # إذا كان Level1_Code ليس له أبناء في BOM
+                    rows.append(initial_path)
+                
+                for path in paths_from_starter or [initial_path]:
                     max_depth = max(max_depth, len(path))
-
+            
+            # 3. إعداد أعمدة DataFrame
             cols = []
             for i in range(1, max_depth + 1):
                 cols.append(f"Level{i}_Code")
@@ -499,67 +538,39 @@ if uploaded_file:
                 for code, desc in path:
                     row_data.extend([code, desc])
                 while len(row_data) < len(cols):
-                    row_data.append("")
+                    row_data.append("") # تعبئة بالخلايا الفارغة
                 table_rows.append(row_data)
 
             bom_levels_df = pd.DataFrame(table_rows, columns=cols)
-
-
-            # ✅ إضافة عمود الكنترول MRP Contor في أول عمود (إن وجد)
-            if not mrp_df.empty and "Component" in mrp_df.columns and "MRP Contor" in mrp_df.columns:
-                mrp_map = mrp_df[["Component", "MRP Contor"]].drop_duplicates()
-                bom_levels_df = pd.merge(
-                    bom_levels_df,
-                    mrp_map,
-                    left_on="Level1_Code",
-                    right_on="Component",
-                    how="left"
-                ).drop(columns=["Component"])
-                # ترتيب الأعمدة بحيث يكون MRP Contor أول عمود
-                cols = ["MRP Contor"] + [c for c in bom_levels_df.columns if c != "MRP Contor"]
-                bom_levels_df = bom_levels_df[cols]
-            else:
-                bom_levels_df.insert(0, "MRP Contor", "N/A")
-
-            # ✅ تأكيد الظهور
-            #st.write("📊 معاينة أول 5 صفوف بعد الدمج:")
-            #st.dataframe(bom_levels_df.head())
-
-            # إعادة ترتيب الأعمدة: للتأكد MRP Contor أول عمود
-            cols_final = ["MRP Contor"] + [c for c in bom_levels_df.columns if c != "MRP Contor"]
-            #bom_levels_df = bom_levels_df.drop_duplicates()
-            bom_levels_df = bom_levels_df[cols_final]
-
-
-
-            # تأكيد توازن عدد الأعمدة فقط (بدون إعادة إنشاء DataFrame)
-            if table_rows:
-                if len(bom_levels_df.columns) != len(bom_levels_df.columns.unique()):
-                    st.warning("⚠️ يوجد تكرار في أسماء الأعمدة، تم تجاهله تلقائيًا.")
-
+            # -------------------------------
+            # إنشاء ملف Excel وحفظه في session_state
+            # -------------------------------
             excel_buffer = BytesIO()
             with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
                 plan_df.to_excel(writer, sheet_name="Plan", index=False)
                 pivot_by_date.to_excel(writer, sheet_name="Need_By_Date", index=False)
-                bom_levels_df.to_excel(writer, sheet_name="BOM_Level1_Expanded", index=False)  # ✅ إضافة شيت BOM_Level1_Expanded
+                bom_levels_df.to_excel(writer, sheet_name="BOM_Level1_Expanded", index=False)
                 pivot_by_date_multi.to_excel(writer, sheet_name="Need_By_Date Multi level", index=False)
                 pivot_by_order.to_excel(writer, sheet_name="Need_By_Order Type", index=False)
                 component_bom_pivot.reset_index().to_excel(writer, sheet_name="Component_in_BOMs", index=False)
                 component_df.to_excel(writer, sheet_name="Component", index=False)
                 if not mrp_df.empty:
                     mrp_df.to_excel(writer, sheet_name="MRP Contor", index=False)
-                mrp_result_pivot.to_excel(writer, sheet_name="MRP_Result", index=False)  # ✅ إضافة شيت MRP_Result
+                mrp_result_pivot.to_excel(writer, sheet_name="MRP_Result", index=False)
 
             excel_buffer.seek(0)
-
+            st.session_state["excel_file"] = excel_buffer
             st.subheader("🔥 Excel أضغط هنا  تحميل ملف كامل")
+            st.session_state["excel_file_date"] = current_date  # حفظ التاريخ في session_state
+
+        # زر التحميل باستخدام النسخة المخزنة
+        if "excel_file" in st.session_state:
             st.download_button(
-                label=" 📊 تحميل ملف Excel",
-                data=excel_buffer,
-                file_name=f"All_Component_Results_{current_date}.xlsx",
+                label="📊 تحميل ملف Excel",
+                data=st.session_state["excel_file"],
+                file_name=f"All_Component_Results_{st.session_state['excel_file_date']}.xlsx",  # استخدام session_state
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
-
             st.success("✅ تم إنشاء الملف بنجاح، وجميع الشيتات موجودة داخل Excel")
 
 # --- التذييل ---
@@ -572,6 +583,3 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
-
-
-
