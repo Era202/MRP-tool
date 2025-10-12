@@ -6,7 +6,7 @@ import datetime
 from io import BytesIO
 import calendar
 import plotly.express as px
-
+import sys # ✅ إضافة مكتبة النظام
 # ==========================================================
 # دالة حساب الـ MRP متعدد المستويات (Multi-Level MRP)
 # ✅ تم تعديل هذه الدالة لتطبيق أولوية الوحدة "القطعة"
@@ -583,3 +583,4 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+
