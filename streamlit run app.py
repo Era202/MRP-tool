@@ -1,7 +1,7 @@
-# ============================ الاصدار الذكى =========================================
+# ===================================== الاصدار الذكى =========================================
 # MRP Analysis Tool Final Version with Stock Analysis and Component Order Type
 # Developed by: Reda Roshdy
-# Date: 29-Sep-2025
+# Date: 17-Sep-2025
 # ==============================================================================
 
 # -------------------------------
@@ -453,22 +453,20 @@ if uploaded_file:
             ]
 
  
-        # -------------------------------
-        # Need_By_Order Type - حساب باستخدام Recursive BOM
-        # -------------------------------
-        st.info("🔁 إعادة حساب Need_By_Order Type باستخدام منطق الـ Recursive BOM...")
 
-        # دالة تفجير تكراري لحساب الكميات لكل مكون بناءً على Order Type
-        def explode_recursive_order(parent_material, qty, order_type, comp_df, results, path):
+        # -------------------------------
+        # Need_By_Order Type - Recursive per Month + OrderType
+        # -------------------------------
+        st.info("📆 إعادة حساب Need_By_Order Type بطريقة Recursive مع فصل الشهر ونوع الطلب...")
+
+        def explode_recursive_order(parent_material, qty, order_type, order_date, comp_df, results, path):
             children = comp_df[comp_df["Material"] == parent_material]
             if children.empty:
                 return
             for _, crow in children.iterrows():
                 child_code = crow["Component"]
-                # منع الحلقات التكرارية
                 if child_code in path:
                     continue
-                # قراءة الكمية لكل وحدة
                 try:
                     per_unit = float(crow.get("Component Quantity", 0) or 0)
                 except:
@@ -482,40 +480,44 @@ if uploaded_file:
                     "Current Stock": crow.get("Current Stock", 0),
                     "Component Order Type": crow.get("Component Order Type", crow.get("Procurement Type", "")),
                     "Order Type": order_type,
+                    "Month": pd.to_datetime(order_date).strftime("%b"),  # الشهر فقط
                     "Required Component Quantity": child_qty
                 })
 
-                # استدعاء تكراري للطفل
-                explode_recursive_order(child_code, child_qty, order_type, comp_df, results, path + [child_code])
+                explode_recursive_order(child_code, child_qty, order_type, order_date, comp_df, results, path + [child_code])
 
-        # تنفيذ التفجير لكل صف في plan_melted
+        # تنفيذ التفجير عبر الخطة كلها
         order_results = []
         for _, prow in plan_melted.iterrows():
             top_material = prow["Material"]
             plan_qty = prow["Planned Quantity"]
             order_type = prow.get("Order Type", "N/A")
-            if plan_qty == 0:
+            order_date = prow.get("Date", None)
+            if plan_qty == 0 or pd.isna(order_date):
                 continue
-            explode_recursive_order(top_material, plan_qty, order_type, component_df, order_results, path=[top_material])
+            explode_recursive_order(top_material, plan_qty, order_type, order_date, component_df, order_results, path=[top_material])
 
-        # تحويل النتائج إلى DataFrame وتجميعها
         order_df = pd.DataFrame(order_results)
+
         if not order_df.empty:
+            # تجميع حسب (Component + OrderType + Month)
             result_order = order_df.groupby(
-                ["Component", "Component Description", "Component UoM", "Current Stock", "Component Order Type", "Order Type"],
+                ["Component", "Component Description", "Component UoM", "Current Stock", "Component Order Type", "Order Type", "Month"],
                 as_index=False
             )["Required Component Quantity"].sum()
 
-            # Pivot بحيث كل Order Type يكون عمود مستقل
+            # إنشاء عمود تجميعي لكل نوع طلب وشهر
+            result_order["Order_Month"] = result_order["Month"] + " (" + result_order["Order Type"] + ")"
+
             pivot_by_order = result_order.pivot_table(
                 index=["Component", "Component Description", "Component UoM", "Current Stock", "Component Order Type"],
-                columns="Order Type",
+                columns="Order_Month",
                 values="Required Component Quantity",
                 aggfunc="sum",
                 fill_value=0
             ).reset_index()
 
-            # دمج عمود MRP Contor لو متاح
+            # دمج مع MRP Contor لو متاح
             if not mrp_df.empty and "Component" in mrp_df.columns and "MRP Contor" in mrp_df.columns:
                 pivot_by_order = pd.merge(
                     pivot_by_order,
@@ -531,8 +533,14 @@ if uploaded_file:
             fixed_order = ["Component", "Component Description", "MRP Contor", "Component UoM", "Current Stock", "Component Order Type"]
             other_cols = [c for c in cols if c not in fixed_order]
             pivot_by_order = pivot_by_order[[c for c in fixed_order if c in pivot_by_order.columns] + other_cols]
+
         else:
             pivot_by_order = pd.DataFrame(columns=["Component", "Component Description", "MRP Contor", "Component UoM", "Current Stock", "Component Order Type"])
+
+
+
+
+
 
 
 
@@ -543,13 +551,14 @@ if uploaded_file:
         st.subheader("📊 تحليل حرجية الرصيد ونسبة التغطية")
 
         # حساب إجمالي الاحتياج والرصيد لكل مكون
+
+
         component_analysis = merged_df.groupby([
             "Component", "Component Description", "Component UoM", 
             "Current Stock", "Component Order Type", "Hierarchy Level"
         ]).agg({
             "Required Component Quantity": "sum",
             "Order Type": lambda x: ", ".join(sorted(set(str(v) for v in x if pd.notna(v))))
-
         }).reset_index()
 
         # دمج بيانات MRP Contor إذا كانت موجودة
@@ -560,6 +569,9 @@ if uploaded_file:
                 on="Component",
                 how="left"
             )
+
+
+
             # استبدال القيم الفارغة بـ "غير محدد"
             component_analysis["MRP Contor"] = component_analysis["MRP Contor"].fillna("غير محدد")
         else:
@@ -588,6 +600,9 @@ if uploaded_file:
 
         hierarchy_levels = sorted(component_analysis[col("hierarchy_level")].dropna().unique())
         selected_levels = st.multiselect("🔍 تصفية حسب المستوى الهرمي (Hierarchy Level):", options=hierarchy_levels, default=hierarchy_levels, help="اختر واحد أو أكثر من المستوى لعرضها")
+
+
+
         # تطبيق الفلتر معاً
         filtered_analysis = component_analysis[
             (component_analysis[col("mrp_controller")].isin(selected_mrp)) &
