@@ -1,4 +1,4 @@
-# ===================================== الاصدار الذكى =========================================
+# ========================== الاصدار الذكى =========================================
 # MRP Analysis Tool Final Version with Stock Analysis and Component Order Type
 # Developed by: Reda Roshdy
 # Date: 17-Sep-2025
@@ -164,7 +164,7 @@ if uploaded_file:
         # ======= الجزء الجديد ==========
         # حساب الـ Recursive BOM Aggregation حسب التاريخ (بدون Top Material في النتيجة)
         # ===============================
-        st.info("🔁 جاري احتساب الـ Recursive BOM (Multi-level) وربطها بالتواريخ...")
+      #  st.info("🔁 جاري احتساب الـ Recursive BOM (Multi-level) وربطها بالتواريخ...")
         
         # دالة تفجير تكراري مع منع الحلقات (loop prevention)
         def explode_recursive(parent_material, qty, date, comp_df, results, path):
@@ -369,7 +369,7 @@ if uploaded_file:
         # -------------------------------
         # Need_By_Date - حساب باستخدام Recursive BOM
         # -------------------------------
-        st.info("🔁 إعادة حساب Need_By_Date باستخدام منطق الـ Recursive BOM...")
+     #   st.info("🔁 إعادة حساب Need_By_Date باستخدام منطق الـ Recursive BOM...")
 
         # دالة تفجير تكراري مخصصة لحساب Need_By_Date (تأخذ معلومات Current Stock و Component Order Type من صف المكون)
         def explode_recursive_need(parent_material, qty, date, comp_df, results, path):
@@ -457,7 +457,7 @@ if uploaded_file:
         # -------------------------------
         # Need_By_Order Type - Recursive per Month + OrderType
         # -------------------------------
-        st.info("📆 إعادة حساب Need_By_Order Type بطريقة Recursive مع فصل الشهر ونوع الطلب...")
+     #   st.info("📆 إعادة حساب Need_By_Order Type بطريقة Recursive مع فصل الشهر ونوع الطلب...")
 
         def explode_recursive_order(parent_material, qty, order_type, order_date, comp_df, results, path):
             children = comp_df[comp_df["Material"] == parent_material]
@@ -814,6 +814,76 @@ if uploaded_file:
             col.strftime("%d %b") if isinstance(col, (datetime.datetime, pd.Timestamp)) else col
             for col in plan_df.columns
         ]
+        # -------------------------------
+        # 📆 تحليل الطلب الشهري للمكونات (الخامات MET فقط)
+        # -------------------------------
+        st.subheader("📆 تحليل الطلب الشهري للمكونات (الخامات MET فقط)")
+
+        # 🔹 فلترة المكونات الخام (التي تبدأ برقم 1) وMRP Contor = MET فقط
+        raw_materials_df = merged_df[
+            merged_df["Component"].astype(str).str.startswith("1")
+        ].copy()
+
+        if not mrp_df.empty:
+            raw_materials_df = pd.merge(
+                raw_materials_df,
+                mrp_df[["Component", "MRP Contor"]],
+                on="Component",
+                how="left"
+            )
+            raw_materials_df = raw_materials_df[
+                raw_materials_df["MRP Contor"].fillna("") == "MET"
+            ]
+
+        # 🔹 توحيد وحدات الوزن: تحويل الجرام إلى كيلوجرام
+        def normalize_uom(row):
+            if str(row["Component UoM"]).strip().lower() in ["g", "gram", "grams"]:
+                return row["Required Component Quantity"] / 1000
+            return row["Required Component Quantity"]
+
+        raw_materials_df["Required Component Quantity (KG)"] = raw_materials_df.apply(normalize_uom, axis=1)
+        raw_materials_df["Component UoM"] = "KG"
+
+        # 🔹 تجميع القيم حسب الشهر والمكون
+        monthly_raw = raw_materials_df.groupby(
+            ["Component", "Component Description", "Component UoM", "Date"]
+        )["Required Component Quantity (KG)"].sum().reset_index()
+
+        # 🔹 Pivot بالشهـر
+        pivot_raw_monthly = monthly_raw.pivot_table(
+            index=["Component", "Component Description", "Component UoM"],
+            columns="Date",
+            values="Required Component Quantity (KG)",
+            aggfunc="sum",
+            fill_value=0
+        ).reset_index()
+
+        # 🔹 تنسيق أعمدة التاريخ لتظهر بشكل واضح (مثلاً: 01 Nov)
+        pivot_raw_monthly.columns = [
+            col.strftime("%d %b") if isinstance(col, pd.Timestamp) else col
+            for col in pivot_raw_monthly.columns
+        ]
+
+        # 🔹 عرض النتائج في الواجهة
+        st.dataframe(pivot_raw_monthly, use_container_width=True)
+
+        # 🔹 إنشاء زر التحميل الفوري بعد إنشاء الملف
+        if not pivot_raw_monthly.empty:
+            raw_excel_buffer = BytesIO()
+            with pd.ExcelWriter(raw_excel_buffer, engine="openpyxl") as writer:
+                pivot_raw_monthly.to_excel(writer, sheet_name="Raw_Materials_MET", index=False)
+            raw_excel_buffer.seek(0)
+
+            st.download_button(
+                label="📥 تحميل ملف تحليل الخامات (MET)",
+                data=raw_excel_buffer,
+                file_name=f"Raw_Materials_Analysis_MET_{datetime.datetime.now().strftime('%d_%b_%Y')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+            st.success("✅ تم إنشاء الملف الخاص بخامات المعادن فقط  بنجاح وجاهز للتحميل.")
+
+
+
 
         # -------------------------------
         # زر إنشاء النسخة الكاملة (التصدير) — سنضيف الشيت الجديد Recursive_BOM_Results
