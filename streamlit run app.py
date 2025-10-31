@@ -253,9 +253,9 @@ if uploaded_file:
         else:
             pivot_recursive = pd.DataFrame(columns=["Component", "Component Description", "Component UoM", "Procurement Type", "MRP Contor"])
 
-        # عرض نتيجة الـ Recursive داخل الواجهة
-        st.subheader("🔁 نتائج الـ Recursive BOM (مجمعة لكل مكون حسب التاريخ)")
-        st.dataframe(pivot_recursive, use_container_width=True)
+  #      # عرض نتيجة الـ Recursive داخل الواجهة
+   #     st.subheader("🔁 نتائج الـ Recursive BOM (مجمعة لكل مكون حسب التاريخ)")
+    #    st.dataframe(pivot_recursive, use_container_width=True)
 
         # ===============================
 
@@ -954,3 +954,4 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+
