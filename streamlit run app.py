@@ -880,7 +880,8 @@ if uploaded_file:
                 file_name=f"Raw_Materials_Analysis_MET_{datetime.datetime.now().strftime('%d_%b_%Y')}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
-            st.success("✅ تم إنشاء الملف الخاص بخامات المعادن فقط  بنجاح وجاهز للتحميل.")
+            st.success("✅(MET)تم إنشاء الملف الخاص بخامات المعادن فقط  بنجاح وجاهز للتحميل اضغط اعلاه  تحميل ملف تحليل الخامات .")
+
 
 
 
@@ -954,4 +955,5 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+
 
