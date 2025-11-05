@@ -814,75 +814,29 @@ if uploaded_file:
             col.strftime("%d %b") if isinstance(col, (datetime.datetime, pd.Timestamp)) else col
             for col in plan_df.columns
         ]
-        # -------------------------------
-        # 📆 تحليل الطلب الشهري للمكونات (الخامات MET فقط)
-        # -------------------------------
-        st.subheader("📆 تحليل الطلب الشهري للمكونات (الخامات MET فقط)")
 
-        # 🔹 فلترة المكونات الخام (التي تبدأ برقم 1) وMRP Contor = MET فقط
-        raw_materials_df = merged_df[
-            merged_df["Component"].astype(str).str.startswith("1")
-        ].copy()
-
+# -------------------------------------------------------------
         if not mrp_df.empty:
-            raw_materials_df = pd.merge(
-                raw_materials_df,
-                mrp_df[["Component", "MRP Contor"]],
-                on="Component",
-                how="left"
-            )
-            raw_materials_df = raw_materials_df[
-                raw_materials_df["MRP Contor"].fillna("") == "MET"
-            ]
+            # 🔸 تأكد من وجود الأعمدة المطلوبة قبل الدمج
+            if all(col in mrp_df.columns for col in ["Component", "MRP Contor"]):
+                raw_materials_df = pd.merge(
+                    raw_materials_df,
+                    mrp_df[["Component", "MRP Contor"]],
+                    on="Component",
+                    how="left"
+                )
 
-        # 🔹 توحيد وحدات الوزن: تحويل الجرام إلى كيلوجرام
-        def normalize_uom(row):
-            if str(row["Component UoM"]).strip().lower() in ["g", "gram", "grams"]:
-                return row["Required Component Quantity"] / 1000
-            return row["Required Component Quantity"]
+                # 🔸 فلترة الصفوف التي بها MRP Contor = MET
+                before_count = len(raw_materials_df)
+                raw_materials_df = raw_materials_df[
+                    raw_materials_df["MRP Contor"].fillna("") == "MET"
+                ]
+                after_count = len(raw_materials_df)
+                st.info(f"✅ تمت التصفية: {before_count - after_count} صف تم استبعاده بناءً على MRP Contor = 'MET'.")
 
-        raw_materials_df["Required Component Quantity (KG)"] = raw_materials_df.apply(normalize_uom, axis=1)
-        raw_materials_df["Component UoM"] = "KG"
-
-        # 🔹 تجميع القيم حسب الشهر والمكون
-        monthly_raw = raw_materials_df.groupby(
-            ["Component", "Component Description", "Component UoM", "Date"]
-        )["Required Component Quantity (KG)"].sum().reset_index()
-
-        # 🔹 Pivot بالشهـر
-        pivot_raw_monthly = monthly_raw.pivot_table(
-            index=["Component", "Component Description", "Component UoM"],
-            columns="Date",
-            values="Required Component Quantity (KG)",
-            aggfunc="sum",
-            fill_value=0
-        ).reset_index()
-
-        # 🔹 تنسيق أعمدة التاريخ لتظهر بشكل واضح (مثلاً: 01 Nov)
-        pivot_raw_monthly.columns = [
-            col.strftime("%d %b") if isinstance(col, pd.Timestamp) else col
-            for col in pivot_raw_monthly.columns
-        ]
-
-        # 🔹 عرض النتائج في الواجهة
-        st.dataframe(pivot_raw_monthly, use_container_width=True)
-
-        # 🔹 إنشاء زر التحميل الفوري بعد إنشاء الملف
-        if not pivot_raw_monthly.empty:
-            raw_excel_buffer = BytesIO()
-            with pd.ExcelWriter(raw_excel_buffer, engine="openpyxl") as writer:
-                pivot_raw_monthly.to_excel(writer, sheet_name="Raw_Materials_MET", index=False)
-            raw_excel_buffer.seek(0)
-
-            st.download_button(
-                label="📥 تحميل ملف تحليل الخامات (MET)",
-                data=raw_excel_buffer,
-                file_name=f"Raw_Materials_Analysis_MET_{datetime.datetime.now().strftime('%d_%b_%Y')}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
-            st.success("✅(MET)تم إنشاء الملف الخاص بخامات المعادن فقط  بنجاح وجاهز للتحميل اضغط اعلاه  تحميل ملف تحليل الخامات .")
-
-
+            else:
+                st.warning("⚠️ ملف MRP لا يحتوي على العمود 'MRP Contor' — تم تخطي الفلترة.")
+# ============================================================================
 
 
 
@@ -955,5 +909,6 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+
 
 
