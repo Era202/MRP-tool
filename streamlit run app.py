@@ -819,20 +819,32 @@ if uploaded_file:
         # -------------------------------
         st.subheader("📆 تحليل الطلب الشهري للمكونات (الخامات MET فقط)")
 
-        # 🔹 فلترة المكونات الخام (التي تبدأ برقم 1) وMRP Contor = MET فقط
+        # 🔹 فلترة المكونات الخام (التي تبدأ برقم 1)
         raw_materials_df = merged_df[
             merged_df["Component"].astype(str).str.startswith("1")
         ].copy()
 
-        if not mrp_df.empty:
+        # 🔹 جلب MRP Contor من mrp_df لو موجود
+        if not mrp_df.empty and "Component" in mrp_df.columns and "MRP Contor" in mrp_df.columns:
             raw_materials_df = pd.merge(
                 raw_materials_df,
                 mrp_df[["Component", "MRP Contor"]],
                 on="Component",
                 how="left"
             )
+        else:
+            raw_materials_df["MRP Contor"] = "N/A"
+
+        # 🔹 تصفية ديناميكية حسب نوع الـ MRP Contor
+        available_mrps = sorted(raw_materials_df["MRP Contor"].dropna().unique().tolist())
+        if available_mrps:
+            selected_mrp_type = st.selectbox(
+                "اختر نوع الـ MRP Contor للتحليل:",
+                options=available_mrps,
+                index=0
+            )
             raw_materials_df = raw_materials_df[
-                raw_materials_df["MRP Contor"].fillna("") == "MET"
+                raw_materials_df["MRP Contor"] == selected_mrp_type
             ]
 
         # 🔹 توحيد وحدات الوزن: تحويل الجرام إلى كيلوجرام
@@ -871,16 +883,16 @@ if uploaded_file:
         if not pivot_raw_monthly.empty:
             raw_excel_buffer = BytesIO()
             with pd.ExcelWriter(raw_excel_buffer, engine="openpyxl") as writer:
-                pivot_raw_monthly.to_excel(writer, sheet_name="Raw_Materials_MET", index=False)
+                pivot_raw_monthly.to_excel(writer, sheet_name=f"Raw_Materials_{selected_mrp_type}", index=False)
             raw_excel_buffer.seek(0)
 
             st.download_button(
-                label="📥 تحميل ملف تحليل الخامات (MET)",
+                label=f"📥 تحميل ملف تحليل الخامات ({selected_mrp_type})",
                 data=raw_excel_buffer,
-                file_name=f"Raw_Materials_Analysis_MET_{datetime.datetime.now().strftime('%d_%b_%Y')}.xlsx",
+                file_name=f"Raw_Materials_Analysis_{selected_mrp_type}_{datetime.datetime.now().strftime('%d_%b_%Y')}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
-            st.success("✅(MET)تم إنشاء الملف الخاص بخامات المعادن فقط  بنجاح وجاهز للتحميل اضغط اعلاه  تحميل ملف تحليل الخامات .")
+            st.success(f"✅ تم إنشاء الملف الخاص بخامات {selected_mrp_type} بنجاح وجاهز للتحميل.")
 
 
 
@@ -1913,3 +1925,4 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+
