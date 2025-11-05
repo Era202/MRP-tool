@@ -836,11 +836,17 @@ if uploaded_file:
             )
 
             # 🔹 تصفية ديناميكية حسب نوع الـ MRP Contor
+            if "MRP Contor" in raw_materials_df.columns:
+                available_mrps = sorted(raw_materials_df["MRP Contor"].dropna().unique().tolist())
+            else:
+                available_mrps = ["غير محدد"]
+
             selected_mrp_type = st.selectbox(
                 "اختر نوع الـ MRP Contor للتحليل:",
-                options=sorted(raw_materials_df["MRP Contor"].dropna().unique().tolist()),
-                index=0 if not raw_materials_df["MRP Contor"].dropna().empty else None
+                options=available_mrps,
+                index=0 if available_mrps else None
             )
+
 
             raw_materials_df = raw_materials_df[
                 raw_materials_df["MRP Contor"].fillna("") == selected_mrp_type
@@ -967,4 +973,5 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+
 
