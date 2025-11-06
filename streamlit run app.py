@@ -1,7 +1,7 @@
-# ===================================== الاصدار الذكى ==============================
+# ===================================== الاصدار الذكى =========================================
 # MRP Analysis Tool Final Version with Stock Analysis and Component Order Type
 # Developed by: Reda Roshdy
-# Date: 5-Sep-2025
+# Date: 17-Sep-2025
 # ==============================================================================
 
 # -------------------------------
@@ -452,7 +452,7 @@ if uploaded_file:
                 for col in pivot_by_date.columns
             ]
 
- 
+
 
         # -------------------------------
         # Need_By_Order Type - Recursive per Month + OrderType
