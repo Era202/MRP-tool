@@ -537,8 +537,7 @@ if uploaded_file:
         else:
             pivot_by_order = pd.DataFrame(columns=["Component", "Component Description", "MRP Contor", "Component UoM", "Current Stock", "Component Order Type"])
 
-
-
+            component_bom_map = prepare_component_bom(component_df)
             component_bom_pivot = component_bom_map.pivot_table(
                 index=["MRP Contor", "Component", "Component Order Type"],
                 columns="Material",
@@ -931,8 +930,8 @@ if uploaded_file:
                     except:
                         pass
                     try:
-                        component_df.to_excel(writer, sheet_name="Component_in_BOMs", index=False)
-                        # component_bom_pivot.reset_index().to_excel(writer, sheet_name="Component_in_BOMs", index=False)
+                        #component_df.to_excel(writer, sheet_name="Component_in_BOMs", index=False)
+                        component_bom_pivot.reset_index().to_excel(writer, sheet_name="Component_in_BOMs", index=False)
                     except:
                         pass
                     component_df.to_excel(writer, sheet_name="Component", index=False)
@@ -962,6 +961,7 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+
 
 
 
