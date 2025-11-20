@@ -539,7 +539,13 @@ if uploaded_file:
 
 
 
-
+            component_bom_pivot = component_bom_map.pivot_table(
+                index=["MRP Contor", "Component", "Component Order Type"],
+                columns="Material",
+                values="OrderType_Quantity",
+                aggfunc=lambda x: ','.join(x),
+                fill_value=""
+            )
 
 
 
@@ -955,4 +961,5 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+
 
