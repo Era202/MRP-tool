@@ -1,20 +1,21 @@
-# ===================================== الاصدار الذكى =========================================
+# ================== الاصدار الذكى (معدل) =========================
 # MRP Analysis Tool Final Version with Stock Analysis and Component Order Type
 # Developed by: Reda Roshdy
 # Date: 17-Sep-2025
+# التعديل: الاعتماد على عمود MRP Controller من ورقة المكونات مباشرةً
 # ==============================================================================
 
-# -------------------------------
+# ==============================================================================
 # 1. استدعاء المكتبات اللازمة
-# -------------------------------
+# ==============================================================================
 import streamlit as st
 import pandas as pd
 import datetime
+import re # ⬅️ إضافة هذا السطر
 from io import BytesIO
 import zipfile
 import calendar
 import plotly.express as px
-
 
 # ==============================================================================
 # 2. إعداد التكوين والأعمدة (تحسين جديد)
@@ -33,7 +34,34 @@ COLUMN_NAMES = {
     "component_order_type": ["Component Order Type", "Order Category", "نوع أمر المكون", "Procurement Type"],
     "hierarchy_level": ["Hierarchy Level", "Level", "المستوى الهرمي"]
 }
+# ==============================================================================
+# 2. تنظيف وتحويل الأرقام
+# ==============================================================================
+def clean_numeric(val):
+    if pd.isna(val): return 0.0
+    s = str(val).strip().replace(',', '')
+    neg = s.endswith('-') or (s.startswith('(') and s.endswith(')'))
+    s = re.sub(r'[^0-9.]', '', s)
+    try: return -float(s) if neg else float(s)
+    except: return 0.0
 
+def ensure_numeric(df, colname):
+    df[colname] = df.get(colname, 0.0).apply(clean_numeric)
+# ==============================================================================
+# 3. توحيد الوحدات (جرام → كجم)
+# ==============================================================================
+def normalize_units(df, qty_col):
+    grams = ["g","gram","grams","gm","جرام","غ"]
+    df = df.copy()
+    # ⬇️ التعديل هنا: استخدام col("component_uom") بدلاً من "Component UoM"
+    uom_col = col("component_uom")
+    
+    df[uom_col] = df[uom_col].astype(str).str.lower()
+    mask = df[uom_col].isin(grams)
+    
+    df.loc[mask, qty_col] /= 1000
+    df.loc[mask, uom_col] = "kg"
+    return df
 # ==============================================================================
 # 3. الدوال المساعدة (Functions)
 # ==============================================================================
@@ -65,7 +93,8 @@ def load_and_validate_data(uploaded_file):
             
         plan_df = normalize_columns(xls.parse("plan"), COLUMN_NAMES)
         component_df = normalize_columns(xls.parse("Component"), COLUMN_NAMES)
-        mrp_df = normalize_columns(xls.parse("MRP Contor"), COLUMN_NAMES) if "MRP Contor" in xls.sheet_names else pd.DataFrame()
+        # ❌ تم إلغاء قراءة ورقة MRP Contor المنفصلة
+        mrp_df = pd.DataFrame() 
 
         # التحقق من الأعمدة الأساسية
         required_plan_columns = [col("material"), col("material_desc"), col("order_type")]
@@ -77,8 +106,13 @@ def load_and_validate_data(uploaded_file):
         if not all(c in component_df.columns for c in required_component_columns):
             st.error(f"❌ جدول المكونات لا يحتوي على الأعمدة المطلوبة: {', '.join(required_component_columns)}")
             st.stop()
-
-        # التحقق من وجود أعمدة اختيارية
+            
+        # ✅ إضافة تحقق إلزامي لعمود MRP Controller في ورقة المكونات
+        if col("mrp_controller") not in component_df.columns:
+            st.error(f"❌ جدول المكونات لا يحتوي على العمود المطلوب: {col('mrp_controller')}")
+            st.stop()
+            
+# التحقق من وجود أعمدة اختيارية وإضافة الافتراضي إن لزم الأمر
         if col("current_stock") not in component_df.columns:
             component_df[col("current_stock")] = 0
 
@@ -86,15 +120,22 @@ def load_and_validate_data(uploaded_file):
             component_df[col("component_order_type")] = "غير محدد"
         
         if col("hierarchy_level") not in component_df.columns:
-            component_df[col("hierarchy_level")] = "غير محدد"
-
+            component_df[col("hierarchy_level")] = "غير محدد"           
+# ==============================================================================
+        # 🗜️ تطبيق تنظيف البيانات وتوحيد الوحدات (جديد)
+# ==============================================================================
+        # 1. ضمان تحويل الكميات والمخزون إلى أرقام
+        ensure_numeric(component_df, col("component_qty"))
+        ensure_numeric(component_df, col("current_stock")) # الآن أصبح موجوداً بفضل السطر 119
+        
+        # 2. توحيد الوحدات (جرام -> كجم)
+        component_df = normalize_units(component_df, col("component_qty"))
+# ==============================================================================
         return plan_df, component_df, mrp_df
 
     except Exception as e:
         st.error(f"حدث خطأ أثناء قراءة الملف: {e}")
         st.stop()
-
-
 # ==============================================================================
 # 4. واجهة المستخدم الرئيسية للتطبيق
 # ==============================================================================
@@ -105,7 +146,7 @@ st.header("📂 MRP الاصدار الذكى من برنامج تحليل وا�
 with st.expander("📖 دليل الاستخدام"):
     st.write("""
     ### كيفية استخدام البرنامج:
-    1. **حمل الملف**: اختر ملف Excel يحتوي على أوراق (plan و Component و MRP Contor)
+    1. **حمل الملف**: اختر ملف Excel يحتوي على أوراق (plan و Component)
     2. **استخدم الفلاتر**: طبّق المرشحات لتضييق النتائج حسب احتياجك
     3. **ابحث**: استخدم خاصية البحث السريع للعثور على مكونات محددة
     4. **حلل**: راجع الرسوم البيانية والتنبيهات
@@ -117,10 +158,15 @@ st.markdown("<p style='font-size:16px; font-weight:bold;'>📂 اختر ملف �
 uploaded_file = st.file_uploader("", type=["xlsx"])
 
 if uploaded_file:
+    # mrp_df سيتم تمريره فارغاً
     plan_df, component_df, mrp_df = load_and_validate_data(uploaded_file)
     plan_df_orig = plan_df.copy()
     component_df_orig = component_df.copy()
     mrp_df_orig = mrp_df.copy()
+
+    # 🚨 التصحيح 1: تعريف جداول فارغة لضمان عدم ظهور NameError في جزء التصدير
+    summary_df = pd.DataFrame()
+    component_bom_pivot = pd.DataFrame()
 
     # أي معالجة أو جداول Pivot بعد كده...
 
@@ -135,10 +181,10 @@ if uploaded_file:
     with st.spinner("⏳ جاري معالجة البيانات وعرض النتائج..."):
         # (نفس الحسابات والجداول والرسوم البيانية الموجودة في كودك الأصلي بدون تعديل)
 
-        # -------------------------------
+# ==============================================================================
         # تحويل شيت الخطة إلى شكل طويل (Plan long)
-        # -------------------------------
-        id_vars = ["Material", "Material Description", "Order Type"]
+# ==============================================================================
+        id_vars = [col("material"), col("material_desc"), col("order_type")]
         # تأكد أن الأعمدة موجودة في حال اختلاف الحروف الكبيرة/الصغيرة
         id_vars = [c for c in id_vars if c in plan_df.columns]
         value_vars = [c for c in plan_df.columns if c not in id_vars]
@@ -154,17 +200,15 @@ if uploaded_file:
         # نتأكد من أن الكمية رقم
         plan_melted["Planned Quantity"] = pd.to_numeric(plan_melted["Planned Quantity"], errors='coerce').fillna(0)
 
-        # -------------------------------
+# ==============================================================================
         # Merge المباشر (كمقياس لمقاربات سابقة) - يبقى موجود للاستعلامات الأخرى
-        # -------------------------------
-        merged_df = pd.merge(plan_melted, component_df, on="Material", how="left")
-        merged_df["Required Component Quantity"] = merged_df["Planned Quantity"] * merged_df["Component Quantity"]
+# ==============================================================================
+        merged_df = pd.merge(plan_melted, component_df, on=col("material"), how="left")
+        merged_df["Required Component Quantity"] = merged_df["Planned Quantity"] * merged_df[col("component_qty")]
 
-        # ===============================
-        # ======= الجزء الجديد ==========
-        # حساب الـ Recursive BOM Aggregation حسب التاريخ (بدون Top Material في النتيجة)
-        # ===============================
-      #  st.info("🔁 جاري احتساب الـ Recursive BOM (Multi-level) وربطها بالتواريخ...")
+# ==============================================================================
+        # ======= Recursive BOM Aggregation =======
+# ==============================================================================
         
         # دالة تفجير تكراري مع منع الحلقات (loop prevention)
         def explode_recursive(parent_material, qty, date, comp_df, results, path):
@@ -177,27 +221,27 @@ if uploaded_file:
             path: قائمة المكونات في المسار الحالي (لتفادي الحلقات)
             """
             # العثور على الأبناء في BOM
-            children = comp_df[comp_df["Material"] == parent_material]
+            children = comp_df[comp_df[col("material")] == parent_material]
             if children.empty:
                 return
             for _, row in children.iterrows():
-                child_code = row["Component"]
+                child_code = row[col("component")]
                 # منع الحلقات: إذا ظهر العنصر مسبقًا في المسار، تجاهل النزول له مرة أخرى
                 if child_code in path:
                     continue
                 # قراءة كمية المكون (قد تكون نص)
                 try:
-                    per_unit = float(row.get("Component Quantity", 0) or 0)
+                    per_unit = float(row.get(col("component_qty"), 0) or 0)
                 except:
                     per_unit = 0.0
                 child_qty = qty * per_unit
                 # إضافة الصف
                 results.append({
-                    "Component": child_code,
-                    "Component Description": row.get("Component Description", ""),
-                    "Component UoM": row.get("Component UoM", ""),
-                    "Procurement Type": row.get("Component Order Type", row.get("Procurement Type", "")),
-                    "MRP Contor": None,  # سنضيفها لاحقًا من mrp_df لو متوفر
+                    col("component"): child_code,
+                    col("component_desc"): row.get(col("component_desc"), ""),
+                    col("component_uom"): row.get(col("component_uom"), ""),
+                    "Procurement Type": row.get(col("component_order_type"), ""),
+                    col("mrp_controller"): row.get(col("mrp_controller"), "N/A"), # ✅ تم جلب MRP Contor من صف المكون
                     "Date": date,
                     "Required Qty": child_qty
                 })
@@ -209,7 +253,7 @@ if uploaded_file:
 
         # نفذ التفجير لكل صف في plan_melted
         for _, plan_row in plan_melted.iterrows():
-            top_mat = plan_row["Material"]
+            top_mat = plan_row[col("material")]
             plan_qty = plan_row["Planned Quantity"]
             order_date = plan_row["Date"]  # pd.Timestamp or NaT
             # إذا الكمية صفر نتخطى
@@ -223,27 +267,27 @@ if uploaded_file:
         if not recursive_df.empty:
             # تجميع حسب المكون والتاريخ
             agg_recursive = recursive_df.groupby(
-                ["Component", "Component Description", "Component UoM", "Procurement Type", "Date"],
+                [col("component"), col("component_desc"), col("component_uom"), "Procurement Type", col("mrp_controller"), "Date"], # ✅ تمت إضافة MRP Contor إلى التجميع
                 as_index=False
             )["Required Qty"].sum()
 
-            # جلب MRP Contor من mrp_df لو موجود
-            if not mrp_df.empty and "Component" in mrp_df.columns and "MRP Contor" in mrp_df.columns:
-                agg_recursive = agg_recursive.merge(mrp_df[["Component", "MRP Contor"]], on="Component", how="left")
-            else:
-                agg_recursive["MRP Contor"] = "N/A"
+            # ❌ تم حذف دمج MRP Contor من mrp_df
 
             # تحويل التاريخ إلى نص dd mmm في العناوين لاحقاً عند pivot
             agg_recursive["Date"] = pd.to_datetime(agg_recursive["Date"], errors='coerce')
 
             # عمل Pivot بحيث كل تاريخ عمود
             pivot_recursive = agg_recursive.pivot_table(
-                index=["Component", "Component Description", "Component UoM", "Procurement Type", "MRP Contor"],
+                index=[col("component"), col("component_desc"), col("component_uom"), "Procurement Type", col("mrp_controller")],
                 columns="Date",
                 values="Required Qty",
                 aggfunc="sum",
                 fill_value=0
             ).reset_index()
+            
+            # إعادة تسمية عمود MRP Contor الناتج من التجميع
+            pivot_recursive.rename(columns={col("mrp_controller"): "MRP Contor"}, inplace=True)
+
 
             # تنسيق أسماء أعمدة التاريخ لعرض dd mmm
             pivot_recursive.columns = [
@@ -251,35 +295,21 @@ if uploaded_file:
             ]
 
         else:
-            pivot_recursive = pd.DataFrame(columns=["Component", "Component Description", "Component UoM", "Procurement Type", "MRP Contor"])
+            pivot_recursive = pd.DataFrame(columns=[col("component"), col("component_desc"), col("component_uom"), "Procurement Type", "MRP Contor"])
 
-  #      # عرض نتيجة الـ Recursive داخل الواجهة
-   #     st.subheader("🔁 نتائج الـ Recursive BOM (مجمعة لكل مكون حسب التاريخ)")
-    #    st.dataframe(pivot_recursive, use_container_width=True)
-
-        # ===============================
-
-         # -------------------------------
-        # تجهيز البيانات الأساسية
-        # -------------------------------
-        plan_melted = plan_df.melt(
-            id_vars=["Material", "Material Description", "Order Type"],
-            var_name="Date",
-            value_name="Planned Quantity"
-        )
-        plan_melted["Date"] = pd.to_datetime(plan_melted["Date"], errors='coerce')
-        merged_df = pd.merge(plan_melted, component_df, on="Material", how="left")
-        merged_df["Required Component Quantity"] = merged_df["Planned Quantity"] * merged_df["Component Quantity"]
-
-        # -------------------------------
+# ==============================================================================
         # الملخص السريع (عرض فقط)
-        # -------------------------------
-        total_models = plan_df["Material"].nunique()
-        total_components = component_df["Component"].nunique()
+# ==============================================================================
+        total_models = plan_df[col("material")].nunique()
+        total_components = component_df[col("component")].nunique()
         total_boms = len(component_df)
-        empty_mrp_count = mrp_df["Component"].isna().sum() if not mrp_df.empty else 0
+        
+        # ❌ حذف إحصائية المكونات بدون MRP Contor من mrp_df
+        # ✅ حساب إحصائية المكونات بدون MRP Contor من ورقة المكونات مباشرة
+        empty_mrp_count = component_df[col("mrp_controller")].isna().sum()
 
-        diff_uom = component_df.groupby("Component")["Component UoM"].nunique()
+
+        diff_uom = component_df.groupby(col("component"))[col("component_uom")].nunique()
         diff_uom = diff_uom[diff_uom > 1]
         total_diff_uom = len(diff_uom)
 
@@ -290,22 +320,16 @@ if uploaded_file:
             diff_uom_str = "لا يوجد"
             diff_uom_color = "green"
 
-        missing_boms = set(plan_df["Material"]) - set(component_df["Material"])
+        missing_boms = set(plan_df[col("material")]) - set(component_df[col("material")])
         total_missing_boms = len(missing_boms)
         missing_boms_html = (
             f"<span style='color:red;'>{', '.join(map(str, missing_boms))}</span>"
             if missing_boms else "<span style='color:green;'>لا يوجد</span>"
         )
-
+    
+# ==============================================================================
         # إحصائية جديدة لأنواع طلب المكونات
-       # purchase_count = len(component_df[component_df[COLUMN_NAMES["component_order_type"]] == "شراء"])
-        #manufacturing_count = len(component_df[component_df[COLUMN_NAMES["component_order_type"]] == "تصنيع"])
-        #undefined_count = len(component_df[component_df[COLUMN_NAMES["component_order_type"]] == "غير محدد"])
-
-
-        # -------------------------------
-        # إحصائية جديدة لأنواع طلب المكونات
-        # -------------------------------
+# ==============================================================================
 
         # خريطة الأكواد إلى النصوص
         order_type_map = {
@@ -314,13 +338,39 @@ if uploaded_file:
         }
 
         # إضافة عمود جديد بالوصف العربي
-        component_df["Order_Type_Label"] = component_df["Component Order Type"].map(order_type_map).fillna("غير محدد")
-
+        component_df["Order_Type_Label"] = component_df[col("component_order_type")].map(order_type_map).fillna("غير محدد")
+# ==============================================================================
         # حساب الإحصائيات بعد توحيد الأعمدة
-        purchase_count = component_df.loc[component_df["Order_Type_Label"] == "شراء", "Component"].nunique()        # عدد المكونات شراء
-        manufacturing_count = component_df.loc[component_df["Order_Type_Label"] == "تصنيع", "Component"].nunique()  # عدد المكونات تصنيع
-        undefined_count = component_df.loc[component_df["Order_Type_Label"] == "غير محدد", "Component"].nunique()   # عدد المكونات غير محددة
+        purchase_count = component_df.loc[component_df["Order_Type_Label"] == "شراء", col("component")].nunique()        # عدد المكونات شراء
+        manufacturing_count = component_df.loc[component_df["Order_Type_Label"] == "تصنيع", col("component")].nunique()  # عدد المكونات تصنيع
+        undefined_count = component_df.loc[component_df["Order_Type_Label"] == "غير محدد", col("component")].nunique()   # عدد المكونات غير محددة
 
+# -------------------------------
+        # بناء جدول الملخص (Summary Sheet) للتصدير
+# -------------------------------
+        summary_data_rows = [
+            {"المقياس": "📌 ملخص نتائج الخطة", "القيمة": "", "ملاحظات": ""},
+            {"المقياس": "🟢 موديلات بوتاجاز بالخطة", "القيمة": total_models, "ملاحظات": ""},
+            {"المقياس": "🔵 عدد المكونات المستخدمة", "القيمة": total_components, "ملاحظات": ""},
+            {"المقياس": "🟠 إجمالي عدد مكونات الـ BOMs", "القيمة": total_boms, "ملاحظات": ""},
+            
+            {"المقياس": "---", "القيمة": "---", "ملاحظات": "---"},
+
+            {"المقياس": "❌ مكونات بدون MRP Contor", "القيمة": empty_mrp_count, "ملاحظات": ""},
+            {"المقياس": "⚠️ مكونات لها أكثر من وحدة", "القيمة": total_diff_uom, "ملاحظات": diff_uom_str},
+            {"المقياس": "✅ منتجات بالخطة بدون BOM", "القيمة": total_missing_boms, "ملاحظات": ", ".join(map(str, missing_boms)) if missing_boms else "لا يوجد"},
+            
+            {"المقياس": "---", "القيمة": "---", "ملاحظات": "---"},
+            
+            {"المقياس": "🔹 ملخص أنواع طلب المكونات", "القيمة": "", "ملاحظات": ""},
+            {"المقياس": "🛒 مكونات شراء", "القيمة": purchase_count, "ملاحظات": ""},
+            {"المقياس": "🏭 مكونات تصنيع", "القيمة": manufacturing_count, "ملاحظات": ""},
+            {"المقياس": "❓ مكونات غير محددة", "القيمة": undefined_count, "ملاحظات": ""},
+        ]
+        
+        summary_df = pd.DataFrame(summary_data_rows)
+        # -------------------------------
+        
         st.markdown(f"""
         <div style="direction:rtl; text-align:right; font-size:20px;">
         <span style="font-size:22px; color:#1976d2;">📌 <b>ملخص نتائج الخطة </b></span>
@@ -364,36 +414,34 @@ if uploaded_file:
         </div>
         """, unsafe_allow_html=True)
 
-
-
-        # -------------------------------
+# ==============================================================================
         # Need_By_Date - حساب باستخدام Recursive BOM
-        # -------------------------------
-     #   st.info("🔁 إعادة حساب Need_By_Date باستخدام منطق الـ Recursive BOM...")
+# ==============================================================================
 
         # دالة تفجير تكراري مخصصة لحساب Need_By_Date (تأخذ معلومات Current Stock و Component Order Type من صف المكون)
         def explode_recursive_need(parent_material, qty, date, comp_df, results, path):
-            children = comp_df[comp_df["Material"] == parent_material]
+            children = comp_df[comp_df[col("material")] == parent_material]
             if children.empty:
                 return
             for _, crow in children.iterrows():
-                child_code = crow["Component"]
+                child_code = crow[col("component")]
                 # منع الحلقات
                 if child_code in path:
                     continue
                 # قراءة الكمية لكل وحدة مع الحماية من القيم النصية
                 try:
-                    per_unit = float(crow.get("Component Quantity", 0) or 0)
+                    per_unit = float(crow.get(col("component_qty"), 0) or 0)
                 except:
                     per_unit = 0.0
                 child_qty = qty * per_unit
 
                 results.append({
-                    "Component": child_code,
-                    "Component Description": crow.get("Component Description", ""),
-                    "Component UoM": crow.get("Component UoM", ""),
-                    "Current Stock": crow.get("Current Stock", 0),
-                    "Component Order Type": crow.get("Component Order Type", crow.get("Procurement Type", "")),
+                    col("component"): child_code,
+                    col("component_desc"): crow.get(col("component_desc"), ""),
+                    col("component_uom"): crow.get(col("component_uom"), ""),
+                    col("current_stock"): crow.get(col("current_stock"), 0),
+                    col("component_order_type"): crow.get(col("component_order_type"), ""),
+                    col("mrp_controller"): crow.get(col("mrp_controller"), "N/A"), # ✅ جلب MRP Contor من صف المكون
                     "Date": date,
                     "Required Component Quantity": child_qty
                 })
@@ -404,7 +452,7 @@ if uploaded_file:
         # تنفيذ التفجير لكل صف في plan_melted
         need_results = []
         for _, prow in plan_melted.iterrows():
-            top_material = prow["Material"]
+            top_material = prow[col("material")]
             plan_qty = prow["Planned Quantity"]
             order_date = prow["Date"]
             if plan_qty == 0 or pd.isna(order_date):
@@ -416,33 +464,27 @@ if uploaded_file:
         if not need_df.empty:
             # تجميع حسب المكون والتاريخ مع جمع الكميات المطلوبة الناتجة من التفجير التكراري
             result_date = need_df.groupby(
-                ["Component", "Component Description", "Component UoM", "Current Stock", "Component Order Type", "Date"],
+                [col("component"), col("component_desc"), col("component_uom"), col("current_stock"), col("component_order_type"), col("mrp_controller"), "Date"], # ✅ إضافة MRP Contor هنا
                 as_index=False
             )["Required Component Quantity"].sum()
 
             # عمل Pivot بحيث كل تاريخ يصبح عمودًا
             pivot_by_date = result_date.pivot_table(
-                index=["Component", "Component Description", "Component UoM", "Current Stock", "Component Order Type"],
+                index=[col("component"), col("component_desc"), col("component_uom"), col("current_stock"), col("component_order_type"), col("mrp_controller")], # ✅ إضافة MRP Contor هنا
                 columns="Date",
                 values="Required Component Quantity",
                 aggfunc="sum",
                 fill_value=0
             ).reset_index()
 
-            # دمج عمود MRP Contor لو متوفر
-            if not mrp_df.empty and "Component" in mrp_df.columns and "MRP Contor" in mrp_df.columns:
-                pivot_by_date = pd.merge(
-                    pivot_by_date,
-                    mrp_df[["Component", "MRP Contor"]],
-                    on="Component",
-                    how="left"
-                )
-            else:
-                pivot_by_date["MRP Contor"] = "N/A"
+            # ❌ تم حذف دمج عمود MRP Contor من mrp_df
+            # ✅ إعادة تسمية العمود
+            pivot_by_date.rename(columns={col("mrp_controller"): "MRP Contor"}, inplace=True)
+
 
             # إعادة ترتيب الأعمدة
             cols = pivot_by_date.columns.tolist()
-            fixed_order = ["Component", "Component Description", "MRP Contor", "Component UoM", "Current Stock", "Component Order Type"]
+            fixed_order = [col("component"), col("component_desc"), "MRP Contor", col("component_uom"), col("current_stock"), col("component_order_type")]
             other_cols = [c for c in cols if c not in fixed_order]
             pivot_by_date = pivot_by_date[fixed_order + other_cols]
 
@@ -451,34 +493,35 @@ if uploaded_file:
                 col.strftime("%d %b") if isinstance(col, pd.Timestamp) else col
                 for col in pivot_by_date.columns
             ]
+        else: # 🚨 التصحيح 2: تعريف جدول فارغ في حالة عدم وجود نتائج لتفادي NameError
+            pivot_by_date = pd.DataFrame(columns=[col("component"), col("component_desc"), "MRP Contor", col("component_uom"), col("current_stock"), col("component_order_type")])
 
 
-
-        # -------------------------------
+# ==============================================================================
         # Need_By_Order Type - Recursive per Month + OrderType
-        # -------------------------------
-     #   st.info("📆 إعادة حساب Need_By_Order Type بطريقة Recursive مع فصل الشهر ونوع الطلب...")
+# ==============================================================================
 
         def explode_recursive_order(parent_material, qty, order_type, order_date, comp_df, results, path):
-            children = comp_df[comp_df["Material"] == parent_material]
+            children = comp_df[comp_df[col("material")] == parent_material]
             if children.empty:
                 return
             for _, crow in children.iterrows():
-                child_code = crow["Component"]
+                child_code = crow[col("component")]
                 if child_code in path:
                     continue
                 try:
-                    per_unit = float(crow.get("Component Quantity", 0) or 0)
+                    per_unit = float(crow.get(col("component_qty"), 0) or 0)
                 except:
                     per_unit = 0.0
                 child_qty = qty * per_unit
 
                 results.append({
-                    "Component": child_code,
-                    "Component Description": crow.get("Component Description", ""),
-                    "Component UoM": crow.get("Component UoM", ""),
-                    "Current Stock": crow.get("Current Stock", 0),
-                    "Component Order Type": crow.get("Component Order Type", crow.get("Procurement Type", "")),
+                    col("component"): child_code,
+                    col("component_desc"): crow.get(col("component_desc"), ""),
+                    col("component_uom"): crow.get(col("component_uom"), ""),
+                    col("current_stock"): crow.get(col("current_stock"), 0),
+                    col("component_order_type"): crow.get(col("component_order_type"), ""),
+                    col("mrp_controller"): crow.get(col("mrp_controller"), "N/A"), # ✅ جلب MRP Contor من صف المكون
                     "Order Type": order_type,
                     "Month": pd.to_datetime(order_date).strftime("%b"),  # الشهر فقط
                     "Required Component Quantity": child_qty
@@ -489,9 +532,9 @@ if uploaded_file:
         # تنفيذ التفجير عبر الخطة كلها
         order_results = []
         for _, prow in plan_melted.iterrows():
-            top_material = prow["Material"]
+            top_material = prow[col("material")]
             plan_qty = prow["Planned Quantity"]
-            order_type = prow.get("Order Type", "N/A")
+            order_type = prow.get(col("order_type"), "N/A")
             order_date = prow.get("Date", None)
             if plan_qty == 0 or pd.isna(order_date):
                 continue
@@ -502,7 +545,7 @@ if uploaded_file:
         if not order_df.empty:
             # تجميع حسب (Component + OrderType + Month)
             result_order = order_df.groupby(
-                ["Component", "Component Description", "Component UoM", "Current Stock", "Component Order Type", "Order Type", "Month"],
+                [col("component"), col("component_desc"), col("component_uom"), col("current_stock"), col("component_order_type"), col("mrp_controller"), "Order Type", "Month"], # ✅ إضافة MRP Contor هنا
                 as_index=False
             )["Required Component Quantity"].sum()
 
@@ -510,79 +553,54 @@ if uploaded_file:
             result_order["Order_Month"] = result_order["Month"] + " (" + result_order["Order Type"] + ")"
 
             pivot_by_order = result_order.pivot_table(
-                index=["Component", "Component Description", "Component UoM", "Current Stock", "Component Order Type"],
+                index=[col("component"), col("component_desc"), col("component_uom"), col("current_stock"), col("component_order_type"), col("mrp_controller")], # ✅ إضافة MRP Contor هنا
                 columns="Order_Month",
                 values="Required Component Quantity",
                 aggfunc="sum",
                 fill_value=0
             ).reset_index()
 
-            # دمج مع MRP Contor لو متاح
-            if not mrp_df.empty and "Component" in mrp_df.columns and "MRP Contor" in mrp_df.columns:
-                pivot_by_order = pd.merge(
-                    pivot_by_order,
-                    mrp_df[["Component", "MRP Contor"]],
-                    on="Component",
-                    how="left"
-                )
-            else:
-                pivot_by_order["MRP Contor"] = "N/A"
+            # ❌ تم حذف دمج مع MRP Contor لو متاح
+            # ✅ إعادة تسمية العمود
+            pivot_by_order.rename(columns={col("mrp_controller"): "MRP Contor"}, inplace=True)
+
 
             # ترتيب الأعمدة
             cols = pivot_by_order.columns.tolist()
-            fixed_order = ["Component", "Component Description", "MRP Contor", "Component UoM", "Current Stock", "Component Order Type"]
+            fixed_order = [col("component"), col("component_desc"), "MRP Contor", col("component_uom"), col("current_stock"), col("component_order_type")]
             other_cols = [c for c in cols if c not in fixed_order]
             pivot_by_order = pivot_by_order[[c for c in fixed_order if c in pivot_by_order.columns] + other_cols]
 
         else:
-            pivot_by_order = pd.DataFrame(columns=["Component", "Component Description", "MRP Contor", "Component UoM", "Current Stock", "Component Order Type"])
-
-            component_bom_map = prepare_component_bom(component_df)
-
-            component_bom_pivot = component_bom_map.pivot_table(
-                index=["MRP Contor", "Component", "Component Order Type"],
-                columns="Material",
-                values="OrderType_Quantity",
-                aggfunc=lambda x: ','.join(x),
-                fill_value=""
-            )
+            pivot_by_order = pd.DataFrame(columns=[col("component"), col("component_desc"), "MRP Contor", col("component_uom"), col("current_stock"), col("component_order_type")])
 
 
-        # -------------------------------
+# ==============================================================================
         # تحليل الرصيد والمكونات الحرجة مع فلتر MRP Contor ونوع الطلب
-        # -------------------------------
+# ==============================================================================
         st.markdown("---")
         st.subheader("📊 تحليل حرجية الرصيد ونسبة التغطية")
 
         # حساب إجمالي الاحتياج والرصيد لكل مكون
-
-
+        # ✅ التعديل: تم إضافة col("mrp_controller") إلى قائمة التجميع
         component_analysis = merged_df.groupby([
-            "Component", "Component Description", "Component UoM", 
-            "Current Stock", "Component Order Type", "Hierarchy Level"
+            col("component"), col("component_desc"), col("component_uom"), 
+            col("current_stock"), col("component_order_type"), col("hierarchy_level"), col("mrp_controller")
         ]).agg({
             "Required Component Quantity": "sum",
-            "Order Type": lambda x: ", ".join(sorted(set(str(v) for v in x if pd.notna(v))))
+            col("order_type"): lambda x: ", ".join(sorted(set(str(v) for v in x if pd.notna(v))))
         }).reset_index()
 
-        # دمج بيانات MRP Contor إذا كانت موجودة
-        if not mrp_df.empty:
-            component_analysis = pd.merge(
-                component_analysis,
-                mrp_df[["Component", "MRP Contor"]],
-                on="Component",
-                how="left"
-            )
-
-
-
-            # استبدال القيم الفارغة بـ "غير محدد"
-            component_analysis["MRP Contor"] = component_analysis["MRP Contor"].fillna("غير محدد")
-        else:
-            component_analysis["MRP Contor"] = "غير محدد"
+        # ❌ تم حذف دمج بيانات MRP Contor
+# ==============================================================================
+        # استبدال القيم الفارغة بـ "غير محدد"
+# ==============================================================================
+        # ✅ إعادة تسمية عمود MRP Contor الناتج من التجميع
+        component_analysis.rename(columns={col("mrp_controller"): "MRP Contor"}, inplace=True)
+        component_analysis["MRP Contor"] = component_analysis["MRP Contor"].fillna("غير محدد")
 
         # حساب نسبة التغطية
-        component_analysis["Coverage Percentage"] = (component_analysis["Current Stock"] / component_analysis["Required Component Quantity"] * 100).round(1)
+        component_analysis["Coverage Percentage"] = (component_analysis[col("current_stock")] / component_analysis["Required Component Quantity"] * 100).round(1)
         component_analysis["Coverage Status"] = component_analysis["Coverage Percentage"].apply(
             lambda x: "🟢 كافية" if x >= 100 else "🟡 جزئية" if x >= 50 else "🔴 غير كافية"
         )
@@ -595,7 +613,7 @@ if uploaded_file:
             axis=1
         )
         # ----- فلاتر المستخدم -----
-        mrp_controllers = sorted(component_analysis[col("mrp_controller")].dropna().unique())
+        mrp_controllers = sorted(component_analysis["MRP Contor"].dropna().unique())
         selected_mrp = st.multiselect("🔍 تصفية حسب MRP Contor:", options=mrp_controllers, default=mrp_controllers, help="اختر واحد أو أكثر من MRP Contor لعرضها")
 
         component_order_types = sorted(component_analysis[col("component_order_type")].dropna().unique())
@@ -605,15 +623,12 @@ if uploaded_file:
         hierarchy_levels = sorted(component_analysis[col("hierarchy_level")].dropna().unique())
         selected_levels = st.multiselect("🔍 تصفية حسب المستوى الهرمي (Hierarchy Level):", options=hierarchy_levels, default=hierarchy_levels, help="اختر واحد أو أكثر من المستوى لعرضها")
 
-
-
         # تطبيق الفلتر معاً
         filtered_analysis = component_analysis[
-            (component_analysis[col("mrp_controller")].isin(selected_mrp)) &
+            (component_analysis["MRP Contor"].isin(selected_mrp)) &
             (component_analysis[col("component_order_type")].isin(selected_order_types)) &
             (component_analysis[col("hierarchy_level")].isin(selected_levels))
         ]
-
 
         # عرض جدول التحليل
         st.dataframe(filtered_analysis.sort_values("Coverage Percentage"))
@@ -642,13 +657,13 @@ if uploaded_file:
         st.markdown("---")
         st.subheader("📊 تحليل المكونات حسب نوع الطلب")
 
-        order_type_stats = filtered_analysis.groupby("Component Order Type").agg({
-            "Component": "count",
+        order_type_stats = filtered_analysis.groupby(col("component_order_type")).agg({
+            col("component"): "count",
             "Required Component Quantity": "sum",
-            "Current Stock": "sum"
+            col("current_stock"): "sum"
         }).reset_index()
 
-        order_type_stats["Coverage Percentage"] = (order_type_stats["Current Stock"] / order_type_stats["Required Component Quantity"] * 100).round(1)
+        order_type_stats["Coverage Percentage"] = (order_type_stats[col("current_stock")] / order_type_stats["Required Component Quantity"] * 100).round(1)
 
         st.dataframe(order_type_stats)
 
@@ -656,7 +671,7 @@ if uploaded_file:
         critical_items = filtered_analysis[filtered_analysis["Priority"] == "🔥 عاجل"]
         if not critical_items.empty:
             st.error("🚨 المكونات الحرجة التي تحتاج إلى اهتمام عاجل:")
-            st.dataframe(critical_items[["Component", "Component Description", "MRP Contor", "Component Order Type", "Current Stock", "Required Component Quantity", "Coverage Percentage", "Priority"]])
+            st.dataframe(critical_items[[col("component"), col("component_desc"), "MRP Contor", col("component_order_type"), col("current_stock"), "Required Component Quantity", "Coverage Percentage", "Priority"]])
         else:
             st.success("✅ لا توجد مكونات حرجة تحتاج إلى اهتمام عاجل")
 
@@ -676,11 +691,11 @@ if uploaded_file:
         if not top_critical.empty:
             # تحويل الأعمدة إلى نص قبل الدمج
             top_critical = top_critical.copy()
-            top_critical["Component"] = top_critical["Component"].astype(str)
-            top_critical["Component Description"] = top_critical["Component Description"].astype(str)
+            top_critical[col("component")] = top_critical[col("component")].astype(str)
+            top_critical[col("component_desc")] = top_critical[col("component_desc")].astype(str)
             
             # إنشاء تسمية مختصرة تجمع بين الكود والوصف
-            top_critical["Short_Label"] = top_critical["Component"] + " - " + top_critical["Component Description"].str[:20]
+            top_critical["Short_Label"] = top_critical[col("component")] + " - " + top_critical[col("component_desc")].str[:20]
             
             # ترتيب المكونات حسب كمية الطلب (من الأكبر إلى الأصغر)
             top_critical = top_critical.sort_values("Required Component Quantity", ascending=True)
@@ -699,12 +714,12 @@ if uploaded_file:
                     "MRP Contor": "MRP Controller"
                 },
                 hover_data={
-                    "Component": True,
-                    "Component Description": True,
-                    "Current Stock": True,
+                    col("component"): True,
+                    col("component_desc"): True,
+                    col("current_stock"): True,
                     "Coverage Percentage": ":.1f",
                     "MRP Contor": True,
-                    "Component Order Type": True
+                    col("component_order_type"): True
                 },
                 color_continuous_scale="RdYlGn_r"  # مقياس ألوان عكسي (أحمر للأقل تغطية)
             )
@@ -753,15 +768,15 @@ if uploaded_file:
         # رسم بياني لتوزيع المكونات حسب نوع الطلب
         fig_order_type = px.pie(
             filtered_analysis, 
-            names="Component Order Type", 
+            names=col("component_order_type"), 
             title="توزيع المكونات حسب نوع الطلب",
-            color="Component Order Type"
+            color=col("component_order_type")
         )
         st.plotly_chart(fig_order_type, use_container_width=True)
 
-        # -------------------------------
+# ==============================================================================
         # جدول الكميات الشهرية + الرسم البياني
-        # -------------------------------
+# ==============================================================================
         if date_cols:
             orders_summary = plan_df.melt(
                 id_vars=[col("material"), col("material_desc"), col("order_type")], 
@@ -811,51 +826,51 @@ if uploaded_file:
             st.plotly_chart(fig, use_container_width=True)
             st.markdown("---")
 
-        # -------------------------------
+# ==============================================================================
         # تحويل رؤوس الأعمدة التي تحتوي على تواريخ إلى صيغة مختصرة "يوم شهر"
-        # -------------------------------
+# ==============================================================================
         plan_df.columns = [
             col.strftime("%d %b") if isinstance(col, (datetime.datetime, pd.Timestamp)) else col
             for col in plan_df.columns
         ]
-        # -------------------------------
+# ==============================================================================
         # 📆 تحليل الطلب الشهري للمكونات (الخامات MET فقط)
-        # -------------------------------
+# ==============================================================================
         st.subheader("📆 تحليل الطلب الشهري للمكونات (الخامات MET فقط)")
 
         # 🔹 فلترة المكونات الخام (التي تبدأ برقم 1) وMRP Contor = MET فقط
         raw_materials_df = merged_df[
-            merged_df["Component"].astype(str).str.startswith("1")
+            merged_df[col("component")].astype(str).str.startswith("1")
         ].copy()
 
-        if not mrp_df.empty:
-            raw_materials_df = pd.merge(
-                raw_materials_df,
-                mrp_df[["Component", "MRP Contor"]],
-                on="Component",
-                how="left"
-            )
-            raw_materials_df = raw_materials_df[
-                raw_materials_df["MRP Contor"].fillna("") == "MET"
-            ]
+        # ✅ الآن نعتمد على عمود MRP Controller الموجود في merged_df
+        raw_materials_df.rename(columns={col("mrp_controller"): "MRP Contor"}, inplace=True)
+        raw_materials_df = raw_materials_df[
+            raw_materials_df["MRP Contor"].fillna("") == "MET"
+        ]
 
-        # 🔹 توحيد وحدات الوزن: تحويل الجرام إلى كيلوجرام
-        def normalize_uom(row):
-            if str(row["Component UoM"]).strip().lower() in ["g", "gram", "grams"]:
-                return row["Required Component Quantity"] / 1000
-            return row["Required Component Quantity"]
 
-        raw_materials_df["Required Component Quantity (KG)"] = raw_materials_df.apply(normalize_uom, axis=1)
-        raw_materials_df["Component UoM"] = "KG"
+# 🔹 توحيد وحدات الوزن: (تم تطبيقها مسبقاً في دالة load_and_validate_data)
+        # ملاحظة: تم توحيد الوحدات (جرام -> كجم) في دالة load_and_validate_data.
+        # لذلك، نحتاج فقط لإعادة تسمية عمود الكمية للوضوح.
+        
+        raw_materials_df.rename(
+            columns={"Required Component Quantity": "Required Component Quantity (KG)"},
+            inplace=True
+        )
+        
+        # 🔹 نضمن أن الوحدة هي KG في هذا الجدول لتبسيط العرض (حيث تم التحويل مسبقاً)
+        raw_materials_df[col("component_uom")] = "KG"
+
 
         # 🔹 تجميع القيم حسب الشهر والمكون
         monthly_raw = raw_materials_df.groupby(
-            ["Component", "Component Description", "Component UoM", "Date"]
+            [col("component"), col("component_desc"), col("component_uom"), "Date"]
         )["Required Component Quantity (KG)"].sum().reset_index()
 
-        # 🔹 Pivot بالشهـر
+        # 🔹 Pivot بالشهر
         pivot_raw_monthly = monthly_raw.pivot_table(
-            index=["Component", "Component Description", "Component UoM"],
+            index=[col("component"), col("component_desc"), col("component_uom")],
             columns="Date",
             values="Required Component Quantity (KG)",
             aggfunc="sum",
@@ -885,59 +900,152 @@ if uploaded_file:
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
             st.success("✅(MET)تم إنشاء الملف الخاص بخامات المعادن فقط  بنجاح وجاهز للتحميل اضغط اعلاه  تحميل ملف تحليل الخامات .")
+# ==============================================================================
+        # 5. حساب جدول (Component in BOMs) - المكونات داخل الموديلات
+# ==============================================================================
+        st.subheader("📋 قائمة الموديلات التي تستخدم كل مكون")
+
+        # 1. دمج بيانات الخطة (Plan) مع بيانات المكونات الأصلية (Component)
+        # نحتاج إلى (material, Planned Quantity, Order Type) من جدول الخطة
+        
+        # تحويل الخطة من الشكل الأفقي إلى الطولي لجمع إجمالي الكمية المطلوبة لكل موديل
+        plan_summary = plan_melted.groupby(
+            [col("material"), col("order_type")]
+        )["Planned Quantity"].sum().reset_index()
+        
+        # إعادة تسمية عمود الكمية
+        plan_summary.rename(columns={"Planned Quantity": "plan_qty"}, inplace=True)
+
+        # دمج الكميات ونوع الطلب إلى جدول المكونات الأصلي
+        component_bom_merged = pd.merge(
+            component_df_orig, 
+            plan_summary, 
+            on=col("material"), 
+            how="left"
+        ).fillna({"plan_qty": 0, col("order_type"): 'N/A'})
 
 
+        # 2. إنشاء عمود تجميعي (model_info) للمحور الأفقي
+        # (الموديل + كمية الخطة + نوع الطلب)
+        component_bom_merged["model_info"] = (
+            component_bom_merged[col("material")].astype(str)
+            + " ("
+            + component_bom_merged["plan_qty"].astype(int).astype(str) # تحويل لرقم صحيح
+            + " "
+            + component_bom_merged[col("order_type")].astype(str)
+            + ")"
+        )
 
+        # 3. إنشاء جدول محوري يضم كمية المكون + معلومات الخطة + نوع الطلب
+        component_bom_pivot = component_bom_merged.pivot_table(
+            index=[
+                col("component"),
+                col("component_desc"),
+                col("mrp_controller"),
+                col("component_uom")
+            ],
+            columns="model_info",
+            values=col("component_qty"),
+            aggfunc="first",
+            fill_value=0
+        ).reset_index()
 
-
-        # -------------------------------
-        # زر إنشاء النسخة الكاملة (التصدير) — سنضيف الشيت الجديد Recursive_BOM_Results
-        # -------------------------------
+        # إعادة تسمية عمود MRP Contor
+        component_bom_pivot.rename(columns={col("mrp_controller"): "MRP Contor"}, inplace=True)
+        
+        # 4. عرض الجدول في الواجهة
+        st.dataframe(component_bom_pivot, use_container_width=True)
+        st.markdown("---")
+# ==============================================================================
+        # زر إنشاء النسخة الكاملة (التصدير)
+# ==============================================================================
         if st.button("🗜️ اضغط هنا لإنشاء النسخة الكاملة"):
             with st.spinner('⏳ جاري إنشاء الملفات وتجهيزها للتحميل...'):
                 current_date = datetime.datetime.now().strftime("%d_%b_%Y")
                 excel_buffer = BytesIO()
+           
                 with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
-                    # أدرج الشيتات الموجودة
-                    plan_df.to_excel(writer, sheet_name="Plan", index=False)
-                    # summary_df قد تم إنشاؤه في القسم الأصلي؛ لو لم يتم إنشاؤه بسبب اختصار الكود، يرجى تضمينه كما في الكود الأصلي
+
+                    # -------------------------------
+                    # شيت الخطة الأساسية
+                    # -------------------------------
+                    try:
+                        plan_df.to_excel(writer, sheet_name="Plan", index=False)
+                    except:
+                        pd.DataFrame().to_excel(writer, sheet_name="Plan", index=False)
+
+                    # -------------------------------
+                    # شيت الملخص
+                    # -------------------------------
                     try:
                         summary_df.to_excel(writer, sheet_name="Summary", index=False)
                     except:
-                        pass
+                        pd.DataFrame().to_excel(writer, sheet_name="Summary", index=False)
 
-                    # ✅ شيت جديد: نتائج الـ Recursive (Pivot)
+                    # -------------------------------
+                    # شيت نتائج الـ Recursive BOM
+                    # -------------------------------
                     try:
                         pivot_recursive.to_excel(writer, sheet_name="Recursive_BOM_Results", index=False)
-                    except Exception as e:
-                        # لو pivot_recursive غير معرّف أو فارغ نضيف DataFrame فارغ أو agg_recursive
+                    except:
                         try:
                             agg_recursive.to_excel(writer, sheet_name="Recursive_BOM_Results", index=False)
                         except:
                             pd.DataFrame().to_excel(writer, sheet_name="Recursive_BOM_Results", index=False)
 
+                    # -------------------------------
+                    # شيت الاحتياجات حسب التاريخ
+                    # -------------------------------
                     try:
                         pivot_by_date.to_excel(writer, sheet_name="Need_By_Date", index=False)
                     except:
-                        pass
+                        pd.DataFrame().to_excel(writer, sheet_name="Need_By_Date", index=False)
+
+                    # -------------------------------
+                    # شيت الاحتياجات حسب نوع الطلب
+                    # -------------------------------
                     try:
                         pivot_by_order.to_excel(writer, sheet_name="Need_By_Order Type", index=False)
                     except:
-                        pass
+                        pd.DataFrame().to_excel(writer, sheet_name="Need_By_Order Type", index=False)
+
+                    # -------------------------------
+                    # شيت تحليل تغطية المخزون للمكونات
+                    # -------------------------------
                     try:
                         component_analysis.to_excel(writer, sheet_name="Stock_Coverage_Analysis", index=False)
                     except:
-                        pass
+                        pd.DataFrame().to_excel(writer, sheet_name="Stock_Coverage_Analysis", index=False)
+
+                    # -------------------------------
+                    # شيت المكونات في BOMs
+                    # -------------------------------
                     try:
                         component_bom_pivot.reset_index().to_excel(writer, sheet_name="Component_in_BOMs", index=False)
                     except:
+                        pd.DataFrame().to_excel(writer, sheet_name="Component_in_BOMs", index=False)
+
+                    # -------------------------------
+                    # شيت المكونات الأساسي
+                    # -------------------------------
+                    try:
+                        component_df.to_excel(writer, sheet_name="Component", index=False)
+                    except:
+                        pd.DataFrame().to_excel(writer, sheet_name="Component", index=False)
+
+                    # -------------------------------
+                    # شيت MRP Contor إذا كان موجود
+                    # -------------------------------
+                    try:
+                        if not mrp_df.empty:
+                            mrp_df.to_excel(writer, sheet_name="MRP Contor", index=False)
+                    except:
                         pass
-                    component_df.to_excel(writer, sheet_name="Component", index=False)
-                    if not mrp_df.empty:
-                        mrp_df.to_excel(writer, sheet_name="MRP Contor", index=False)
 
                 excel_buffer.seek(0)
-
+# ==============================================================================
+                # زر التحميل
+# ==============================================================================
                 st.subheader("🔥 أضغط هنا لتحميل النسخة الإكسل الكاملة ")
                 st.download_button(
                     label=" 📊  تحميل ملف الإكسل",
@@ -947,9 +1055,9 @@ if uploaded_file:
                 )
                 st.balloons()
                 st.success("✅ تم إنشاء النسخة الكاملة بنجاح، وجميع الشيتات موجودة داخل Excel")
-
-
+# ==============================================================================
 # --- التذييل ---
+# ==============================================================================
 st.markdown(
     """
     <hr>
@@ -959,10 +1067,3 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
-
-
-
-
-
-
-
