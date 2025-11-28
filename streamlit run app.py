@@ -3,11 +3,10 @@ import pandas as pd
 from io import BytesIO
 
 st.set_page_config(page_title="🔥 MRP BOM Explosion  ", layout="wide")
-st.title("🔥 MRP Tool -  MRP BOM Explosion استخراج الاحتياجات من المكونات لخطة أنتاج ")
+st.title("🔥 MRP Tool -    حساب القيمة الجديدة (Component Quantity / Base Quantity) MRP BOM Explosion استخراج الاحتياجات من المكونات لخطة أنتاج ")
 
 # رفع ملف Excel
 uploaded_file = st.file_uploader("اختر ملف Excel يحتوي على أوراق plan و Component", type=["xlsx"])
-
 if uploaded_file:
     xls = pd.ExcelFile(uploaded_file)
     if "plan" not in xls.sheet_names or "Component" not in xls.sheet_names:
@@ -17,6 +16,18 @@ if uploaded_file:
     # قراءة أوراق Excel
     plan_df = pd.read_excel(xls, sheet_name="plan")
     component_df = pd.read_excel(xls, sheet_name="Component")
+    
+    # -----------------------------
+    base_col = "Base Quantity"
+    qty_col = "Component Quantity"
+
+    if base_col in component_df.columns and qty_col in component_df.columns:
+        # تجنب القسمة على صفر
+        component_df[qty_col] = component_df.apply(
+            lambda row: row[qty_col] / row[base_col] if row[base_col] != 0 else 0, axis=1
+        )
+        # حذف العمود بعد الاستخدام
+        component_df = component_df.drop(columns=[base_col])
 
     # -----------------------------------------------
     # 1. إزالة الصفوف المكررة وحفظ الأصلية
@@ -263,3 +274,4 @@ if uploaded_file:
             file_name="MRP_Explosion_Reports.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
+
