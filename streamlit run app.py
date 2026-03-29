@@ -269,7 +269,7 @@ def bom_explosion(plan_melted, component_df):
 # ==============================================================================
 # 4. واجهة المستخدم
 # ==============================================================================
-st.set_page_config(page_title="🔥 MRP Tool", page_icon="🔥", layout="wide")
+st.set_page_config(page_title="💪 MRP Tool", page_icon="🔥", layout="wide")
 st.header("🔥 برنامج تحليل واستخراج وحفظ نتائج الـ MRP")
 
 with st.expander("📖 دليل الاستخدام"):
