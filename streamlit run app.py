@@ -1,8 +1,8 @@
-# =====================("📂 MRP  برنامج تحليل واستخراج وحفظ نتائج الـ")================
+# =====================("📂 MRP  برنامج تحليل واستخراج وحفظ نتائج الـ")======================
 # MRP Analysis Tool - Multi-Level BOM Explosion
 # Developed by: Reda Roshdy
 # Fixed & Enhanced by: Claude (Anthropic)
-# Date: 29-Mar-2026
+# Date: 30-Mar-2026
 # =======================================================================
 
 # -------------------------------
@@ -149,30 +149,37 @@ def load_and_validate_data(uploaded_file):
             component_df.loc[is_gram, stk_col] = component_df.loc[is_gram, stk_col] / 1000
             component_df.loc[is_gram, uom_col] = "KG"
 
+        # ✅ NEW: توحيد وحدات المساحة من CM2 إلى M2
+        cm2_variants = {"cm2", "cm^2", "cm²", "سم2", "سم²"}
+        is_cm2 = component_df[uom_col].astype(str).str.strip().str.lower().isin(cm2_variants)
+
+        if is_cm2.any():
+            component_df.loc[is_cm2, qty_col] = component_df.loc[is_cm2, qty_col] / 10000
+            component_df.loc[is_cm2, stk_col] = component_df.loc[is_cm2, stk_col] / 10000
+            component_df.loc[is_cm2, uom_col] = "M2"
+
         return plan_df, component_df, mrp_df
 
     except Exception as e:
         st.error(f"❌ فشل تحميل الملف: {str(e)}")
         st.stop()
 
-
 # ==============================================================================
 # ✅ FIX 2: دالة BOM Explosion متعددة المستويات (الإصلاح الجوهري)
 # ==============================================================================
 def bom_explosion(plan_melted, component_df):
     """
-    Multi-Level BOM Explosion — النهج الصحيح
+    Multi-Level BOM Explosion — النهج الصحيح لـ SAP CS12
 
-    ⚠️ مشكلة SAP CS12:
-    - عمود Material = الجذر دائماً (نفس القيمة لكل الصفوف)
-    - عمود Parent Material = الأب المباشر الفعلي
-    - SAP يكرر نفس الصف (Parent→Component بنفس الكمية) لكل مسار يصل للجذر
-      مثال: 400000165→100002432 qty=35 تظهر 8 مرات → groupby+sum يعطي 280 خطأً
+    المفتاح الذهبي:  Material + Parent Material + Component
+    ✔ يمنع دمج نفس (Parent→Component) من منتجات مختلفة
+    ✔ يجمع الكميات داخل نفس المنتج فقط
+    ✔ يعزل bom_dict لكل Material → explosion آمن بدون تلوث
 
-    ✅ الحل: drop_duplicates على (Parent Material, Component)
-    - يضمن كمية واحدة صحيحة لكل علاقة أب→مكون
-    - ثم بناء bom_dict: Parent → [(Component, qty), ...]
-    - ثم explosion تعاودي يحافظ على تفصيل (Date, OrderType, BOMLevel)
+    الخوارزمية:
+    1. groupby(Material + Parent + Component) → bom_core فريد لكل منتج
+    2. bom_dict per Material → tree[parent] = [(comp, qty), ...]
+    3. explode تعاودي لكل صف في الخطة مستقلاً
     """
     from collections import defaultdict
 
@@ -188,17 +195,33 @@ def bom_explosion(plan_melted, component_df):
     else:
         parent_col = col("material")
 
-    # ✅ dedup على (Parent, Component) لإزالة تكرارات SAP CS12
-    bom_core = component_df.drop_duplicates(
-        subset=[parent_col, col("component")], keep="first"
+    # ✅ STEP 1: تنظيف ثم groupby(Material + Parent + Component) + sum
+    #
+    # SAP CS12 يصدر أحياناً صفوفاً مكررة حرفياً لنفس الزوج (Parent→Component)
+    # بنفس الكمية — هذه نسخ وليست كميات إضافية حقيقية.
+    # الحل الصحيح: خطوتان:
+    #   1. drop_duplicates على كل الأعمدة → يحذف النسخ الحرفية
+    #   2. groupby(Material+Parent+Component)+sum → يجمع الكميات الحقيقية المختلفة
+    #      داخل نفس المنتج، مع عزل كامل بين المنتجات المختلفة
+    component_df = component_df.drop_duplicates(
+        subset=[col("material"), parent_col, col("component"), col("component_qty")],
+        keep="first"
     )
+    bom_core = component_df.groupby(
+        [col("material"), parent_col, col("component")],
+        as_index=False
+    )[col("component_qty")].sum()
 
-    # بناء bom_dict: Parent → قائمة (Component, qty_per_unit)
-    bom_dict = defaultdict(list)
-    for _, row in bom_core.iterrows():
-        bom_dict[row[parent_col]].append(
-            (row[col("component")], row[col("component_qty")])
-        )
+    # ✅ STEP 2: بناء bom_dict منفصل لكل Material
+    # tree[material][parent] = [(component, qty), ...]
+    bom_dict = {}
+    for mat, group in bom_core.groupby(col("material")):
+        tree = defaultdict(list)
+        for _, row in group.iterrows():
+            tree[row[parent_col]].append(
+                (row[col("component")], row[col("component_qty")])
+            )
+        bom_dict[mat] = tree
 
     # معلومات وصفية للمكونات
     comp_info = (
@@ -213,38 +236,40 @@ def bom_explosion(plan_melted, component_df):
         ]]
     )
 
-    # دالة الـ explosion التعاودي
-    def explode(parent, qty, path, results, level):
+    # ✅ STEP 3: دالة explosion تعاودية آمنة
+    def explode(material, parent, qty, path, level, row_buf):
         if parent in path or level > 10:
             return
-        children = bom_dict.get(parent, [])
+        tree = bom_dict.get(material, {})
+        children = tree.get(parent, [])
         if not children:
             return
         new_path = path | {parent}
         for comp, comp_qty in children:
             needed = qty * comp_qty
-            results.append({
-                "Parent":                    parent,
-                col("component"):            comp,
-                col("component_qty"):        comp_qty,
-                "Required Component Quantity": needed,
-                "BOM Level":                 level,
+            row_buf.append({
+                "Parent":                        parent,
+                col("component"):                comp,
+                col("component_qty"):            comp_qty,
+                "Required Component Quantity":   needed,
+                "BOM Level":                     level,
             })
-            explode(comp, needed, new_path, results, level + 1)
+            explode(material, comp, needed, new_path, level + 1, row_buf)
 
-    # تشغيل الـ explosion لكل صف في الخطة
+    # ✅ STEP 4: تشغيل الـ explosion لكل صف في الخطة
     all_rows = []
     for _, plan_row in plan_melted[plan_melted["Planned Quantity"] > 0].iterrows():
         mat  = str(plan_row[col("material")]).strip()
         qty  = plan_row["Planned Quantity"]
         ot   = plan_row[col("order_type")]
         date = plan_row["Date"]
-        row_results = []
-        explode(mat, qty, set(), row_results, level=1)
-        for r in row_results:
+
+        row_buf = []
+        explode(mat, mat, qty, set(), level=1, row_buf=row_buf)
+        for r in row_buf:
             r["Order Type"] = ot
             r["Date"]       = date
-        all_rows.extend(row_results)
+        all_rows.extend(row_buf)
 
     if not all_rows:
         return pd.DataFrame()
@@ -269,8 +294,8 @@ def bom_explosion(plan_melted, component_df):
 # ==============================================================================
 # 4. واجهة المستخدم
 # ==============================================================================
-st.set_page_config(page_title="🔥 MRP Tool", page_icon="💪", layout="wide")
-st.header("🔥 برنامج تحليل واستخراج وحفظ نتائج الـ MRP")
+st.set_page_config(page_title="💪🔥 MRP Tool", page_icon="👍", layout="wide")
+st.header("🔥 برنامج تحليل واستخراج وحفظ نتائج الـ MRP 💪🔥")
 
 with st.expander("📖 دليل الاستخدام"):
     st.markdown("""
@@ -339,8 +364,8 @@ with st.spinner("⏳ جاري معالجة البيانات..."):
     # ==============================================================================
     # ✅ B. تشغيل Multi-Level BOM Explosion
     # ==============================================================================
-    st.markdown("---")
-    st.subheader("🔩 نتائج BOM Explosion — جميع المستويات الهرمية")
+#    st.markdown("---")
+#    st.subheader("🔩 نتائج BOM Explosion — جميع المستويات الهرمية")
 
     result_df = bom_explosion(plan_melted, component_df)
 
@@ -367,11 +392,11 @@ with st.spinner("⏳ جاري معالجة البيانات..."):
         )
 
         actual_levels = sorted(merged_df["BOM Level"].unique())
-        st.success(
-            f"✅ إجمالي صفوف الاحتياج: {len(merged_df):,} | "
-            f"مكونات فريدة: {merged_df[col('component')].nunique():,} | "
-            f"المستويات المحسوبة: {actual_levels}"
-        )
+#        st.success(
+ #           f"✅ إجمالي صفوف الاحتياج: {len(merged_df):,} | "
+  #          f"مكونات فريدة: {merged_df[col('component')].nunique():,} | "
+   #         f"المستويات المحسوبة: {actual_levels}"
+    #    )
 
         # 🔍 DEBUG: مساعدة في التشخيص — يمكن إخفاؤه بعد التحقق
         with st.expander("🔍 تشخيص: عيّنة من نتائج result_df الخام (قبل التجميع)"):
@@ -389,9 +414,9 @@ with st.spinner("⏳ جاري معالجة البيانات..."):
             "Order Type", "Date", "Required Component Quantity", "BOM Level"
         ]
         display_cols = [c for c in display_cols if c in merged_df.columns]
-   #     st.dataframe(merged_df[display_cols].sort_values(
-    #        ["BOM Level", col("component"), "Date"]
-     #   ), use_container_width=True)
+#        st.dataframe(merged_df[display_cols].sort_values(
+ #           ["BOM Level", col("component"), "Date"]
+  #      ), use_container_width=True)
 
     # ==============================================================================
     # C. الملخص السريع
@@ -405,7 +430,13 @@ with st.spinner("⏳ جاري معالجة البيانات..."):
     diff_uom = component_df.groupby(col("component"))[col("component_uom")].nunique()
     diff_uom = diff_uom[diff_uom > 1]
     total_diff_uom = len(diff_uom)
-    diff_uom_str   = ", ".join(map(str, diff_uom.index)) if total_diff_uom > 0 else "لا يوجد"
+
+    # اضافة المسمى جانب الكود لاكثر من وحدة
+#    diff_uom_str   = ", ".join(map(str, diff_uom.index)) if total_diff_uom > 0 else "لا يوجد"
+    diff_uom_str = ", ".join(
+        f"{comp_code} ({component_df.loc[component_df[col('component')] == comp_code, 'Component Description'].iloc[0]})"
+        for comp_code in diff_uom.index) if total_diff_uom > 0 else "لا يوجد"
+
     diff_uom_color = "red" if total_diff_uom > 0 else "green"
 
     missing_boms      = set(plan_df[col("material")]) - set(component_df[col("material")])
