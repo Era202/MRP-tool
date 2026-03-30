@@ -2,7 +2,7 @@
 # MRP Analysis Tool - Multi-Level BOM Explosion
 # Developed by: Reda Roshdy
 # Fixed & Enhanced by: Claude (Anthropic)
-# Date: 30-Mar-2026
+# Date: 31-Mar-2026
 # =======================================================================
 
 # -------------------------------
@@ -31,7 +31,6 @@ COLUMN_NAMES = {
     "current_stock":        ["Current Stock", "Stock", "المخزون الحالي", "Unrestricted"],
     "component_order_type": ["Component Order Type", "Order Category", "نوع أمر المكون", "Procurement Type"],
     "hierarchy_level":      ["Hierarchy Level", "Level", "المستوى الهرمي"],
-    # ✅ عمود الأب الفعلي المباشر — مصدر SAP CS12
     "parent_material":      ["Parent Material", "Direct Parent", "الأب المباشر"],
 }
 
@@ -255,6 +254,9 @@ def bom_explosion(plan_melted, component_df):
                 "BOM Level":                     level,
             })
             explode(material, comp, needed, new_path, level + 1, row_buf)
+
+            # 🔁 الاستدعاء العودي الصحيح: نمرر comp كـ current_material لتفجير BOM الخاص به
+#            explode(comp, comp, needed, new_path, level + 1, row_buf)
 
     # ✅ STEP 4: تشغيل الـ explosion لكل صف في الخطة
     all_rows = []
@@ -487,7 +489,7 @@ with st.spinner("⏳ جاري معالجة البيانات..."):
     """, unsafe_allow_html=True)
 
     st.subheader("📊 توزيع المكونات على المستويات الهرمية")
-    st.dataframe(levels_summary, use_container_width=True)
+    st.dataframe(levels_summary, use_container_width=True,hide_index=True)
 
     # ==============================================================================
     # D. Need_By_Date — الاحتياج حسب التاريخ
@@ -525,7 +527,7 @@ with st.spinner("⏳ جاري معالجة البيانات..."):
             for c in pivot_by_date.columns
         ]
 
-        st.dataframe(pivot_by_date, use_container_width=True)
+        st.dataframe(pivot_by_date, use_container_width=True,hide_index=True)
 
     # ==============================================================================
     # E. Need_By_Order_Type — الاحتياج حسب التاريخ ونوع الطلب (E / L)
@@ -569,7 +571,7 @@ with st.spinner("⏳ جاري معالجة البيانات..."):
                 flat_cols.append(c)
         pivot_by_order.columns = flat_cols
 
-        st.dataframe(pivot_by_order, use_container_width=True)
+        st.dataframe(pivot_by_order, use_container_width=True,hide_index=True)
 
     # ==============================================================================
     # F. تحليل الرصيد والتغطية
@@ -640,7 +642,7 @@ with st.spinner("⏳ جاري معالجة البيانات..."):
             component_analysis["BOM Level"].isin(selected_lv)
         ]
 
-        st.dataframe(filtered_analysis.sort_values("Coverage Percentage"), use_container_width=True)
+        st.dataframe(filtered_analysis.sort_values("Coverage Percentage"), use_container_width=True,hide_index=True)
 
         # إحصائيات التغطية
         tc  = max(len(filtered_analysis), 1)
