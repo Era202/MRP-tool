@@ -2,7 +2,7 @@
 # MRP Analysis Tool - Multi-Level BOM Explosion
 # Developed by: Reda Roshdy
 # Fixed & Enhanced by: Claude (Anthropic)
-# Date: 31-Mar-2026
+# Date: Apr-2026 ----- done for All
 # =======================================================================
 
 # -------------------------------
@@ -94,6 +94,11 @@ def load_and_validate_data(uploaded_file):
                 pd.to_numeric(component_df[base_qty_col], errors='coerce')
                 .fillna(1).replace(0, 1)
             )
+            # ⚠️ تحذير عند وجود أصفار في Base Quantity
+            zero_base = (pd.to_numeric(xls.parse("Component").get(base_qty_col, pd.Series(dtype=float)),
+                                       errors='coerce') == 0).sum() if base_qty_col in xls.parse("Component").columns else 0
+            if zero_base > 0:
+                st.warning(f"⚠️ يوجد {zero_base} قيمة صفرية في عمود Base Quantity — تم استبدالها بـ 1 تلقائياً. تحقق من البيانات.")
             component_df[comp_qty_col] = component_df[comp_qty_col] / component_df[base_qty_col]
             component_df.drop(columns=[base_qty_col], inplace=True)
 
@@ -236,15 +241,38 @@ def bom_explosion(plan_melted, component_df):
     )
 
     # ✅ STEP 3: دالة explosion تعاودية آمنة
-    def explode(material, parent, qty, path, level, row_buf):
+    def explode(root_material, parent, qty, path, level, row_buf):
+        """
+        root_material : المنتج الجذر (لجلب bom_dict الصحيح)
+        parent        : الأب الحالي الذي نبحث عن أبنائه
+        qty           : الكمية المطلوبة من الأب الحالي
+        path          : مسار العقد التي مررنا بها (لمنع الحلقات)
+        level         : المستوى الهرمي الحالي
+        row_buf       : مخزن الصفوف الناتجة
+
+        المنطق الصحيح لحساب الكميات:
+        - نبحث أولاً في bom_dict[root_material] عن أبناء parent
+        - إذا لم نجد (مكون وسيط له BOM مستقل)، نبحث في bom_dict[parent]
+        - الكمية المطلوبة = qty_from_parent × qty_of_this_child
+        """
         if parent in path or level > 10:
             return
-        tree = bom_dict.get(material, {})
+
+        # البحث في شجرة المنتج الجذر أولاً، ثم في شجرة الأب نفسه (نصف مصنّع)
+        tree = bom_dict.get(root_material, {})
         children = tree.get(parent, [])
+
+        if not children:
+            # المكون الوسيط قد يكون له BOM مستقل (semi-finished product)
+            tree = bom_dict.get(parent, {})
+            children = tree.get(parent, [])
+
         if not children:
             return
+
         new_path = path | {parent}
         for comp, comp_qty in children:
+            # ✅ الكمية الصحيحة: كمية الأب × كمية المكون لكل وحدة من الأب
             needed = qty * comp_qty
             row_buf.append({
                 "Parent":                        parent,
@@ -253,10 +281,11 @@ def bom_explosion(plan_melted, component_df):
                 "Required Component Quantity":   needed,
                 "BOM Level":                     level,
             })
-            explode(material, comp, needed, new_path, level + 1, row_buf)
-
-            # 🔁 الاستدعاء العودي الصحيح: نمرر comp كـ current_material لتفجير BOM الخاص به
-#            explode(comp, comp, needed, new_path, level + 1, row_buf)
+            # 🔁 الاستدعاء العودي الصحيح:
+            # - نمرر comp كـ parent الجديد (الأب للمستوى التالي)
+            # - نمرر needed كـ qty (الكمية المطلوبة من comp)
+            # - نحاول أولاً داخل شجرة root_material، وإلا داخل شجرة comp نفسه
+            explode(root_material, comp, needed, new_path, level + 1, row_buf)
 
     # ✅ STEP 4: تشغيل الـ explosion لكل صف في الخطة
     all_rows = []
