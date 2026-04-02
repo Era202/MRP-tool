@@ -2,7 +2,7 @@
 # MRP Analysis Tool - Multi-Level BOM Explosion
 # Developed by: Reda Roshdy
 # Fixed & Enhanced by: Claude (Anthropic)
-# Date: Apr-2026 ----- done for All
+# Date: Mar-2026
 # =======================================================================
 
 # -------------------------------
@@ -70,6 +70,12 @@ def load_and_validate_data(uploaded_file):
             if "MRP Controller" in xls.sheet_names
             else pd.DataFrame()
         )
+
+        # ✅ إزالة الأعمدة الزائدة غير المعروفة من ورقة Component
+        known_cols = [aliases[0] for aliases in COLUMN_NAMES.values()]
+        extra_cols = [c for c in component_df.columns if c not in known_cols]
+        if extra_cols:
+            component_df.drop(columns=extra_cols, inplace=True)
 
         # --- التحقق من الأعمدة الأساسية ---
         required_plan_cols = [col("material"), col("material_desc"), col("order_type")]
@@ -297,9 +303,12 @@ def bom_explosion(plan_melted, component_df):
 
         row_buf = []
         explode(mat, mat, qty, set(), level=1, row_buf=row_buf)
+        mat_desc = str(plan_row.get(col("material_desc"), "")).strip()
         for r in row_buf:
-            r["Order Type"] = ot
-            r["Date"]       = date
+            r[col("material")]      = mat
+            r[col("material_desc")] = mat_desc
+            r["Order Type"]         = ot
+            r["Date"]               = date
         all_rows.extend(row_buf)
 
     if not all_rows:
@@ -744,49 +753,94 @@ with st.spinner("⏳ جاري معالجة البيانات..."):
         st.plotly_chart(fig_ot, use_container_width=True)
 
     # ==============================================================================
-    # G. Component in BOMs — قائمة الموديلات لكل مكون
+    # G. Component in BOMs — النمطي التراكمي لكل مكون داخل منتج تام = 1 وحدة
     # ==============================================================================
     st.markdown("---")
-    st.subheader("📋 قائمة الموديلات التي تستخدم كل مكون")
-
-    plan_summary = (
-        plan_melted
-        .groupby([col("material"), col("material_desc"), col("order_type")], as_index=False)
-        ["Planned Quantity"].sum()
-        .rename(columns={"Planned Quantity": "plan_qty"})
-    )
-    plan_summary[col("order_type")] = plan_summary[col("order_type")].astype(str).fillna("N/A")
-
-    cbm = pd.merge(component_df_orig, plan_summary, on=col("material"), how="left")
-    cbm["plan_qty"] = cbm["plan_qty"].fillna(0)
-    cbm[col("order_type")] = cbm[col("order_type")].astype(str).fillna("N/A")
-
-    if col("material_desc") not in cbm.columns:
-        cbm = cbm.merge(
-            plan_summary[[col("material"), col("material_desc")]].drop_duplicates(),
-            on=col("material"), how="left"
+    st.subheader("📋 قائمة الموديلات التي تستخدم كل مكون (نمطي لكل منتج تام = 1)")
+ 
+    if not result_df.empty:
+        # نُنشئ plan_unit: صف واحد لكل (Material, material_desc, Order Type) بكمية = 1
+        unit_plan = (
+            plan_melted[[col("material"), col("material_desc"), col("order_type")]]
+            .drop_duplicates()
+            .copy()
         )
-    cbm[col("material_desc")] = cbm[col("material_desc")].astype(str).fillna("")
+        unit_plan["Planned Quantity"] = 1
+        unit_plan["Date"] = pd.Timestamp("2000-01-01")   # تاريخ وهمي ثابت
+ 
+        # نُشغّل explosion بكمية = 1 → يعطي النمطي التراكمي لكل منتج
+        unit_result = bom_explosion(unit_plan, component_df)
+ 
+        if not unit_result.empty:
+            # 🔹 المفتاح: Material + Order Type فقط (بدون material_desc)
+            # السبب: material_desc في unit_result يأتي من bom_explosion وقد يكون فارغاً
+            # مما يُفشل الدمج ويُعيد plan_qty = NaN → 0
+            plan_qty_map = (
+                plan_melted.groupby([col("material"), col("order_type")])["Planned Quantity"]
+                .sum()
+                .reset_index()
+                .rename(columns={"Planned Quantity": "plan_qty"})
+            )
+            # نُحضّر material_desc الصحيح من plan_melted بشكل منفصل
+            mat_desc_map = (
+                plan_melted[[col("material"), col("material_desc")]]
+                .drop_duplicates(subset=[col("material")])
+                .copy()
+            )
 
-    cbm["model_info"] = (
-        cbm[col("material")].astype(str) + " | " +
-        cbm["plan_qty"].round(0).astype(int).astype(str) + " | " +
-        cbm[col("material_desc")] + " (" + cbm[col("order_type")] + ")"
-    )
-    cbm[col("component_qty")] = pd.to_numeric(cbm[col("component_qty")], errors="coerce")
+            # 🔹 توحيد الأنواع
+            unit_result[col("material")] = unit_result[col("material")].astype(str)
+            unit_result["Order Type"]    = unit_result["Order Type"].astype(str)
+            plan_qty_map[col("material")]   = plan_qty_map[col("material")].astype(str)
+            plan_qty_map[col("order_type")] = plan_qty_map[col("order_type")].astype(str)
+            mat_desc_map[col("material")]   = mat_desc_map[col("material")].astype(str)
 
-    pivot_index = [col("component"), col("component_desc"), "BOM Level", col("mrp_controller"), col("component_uom")]
-    pivot_index = [c for c in pivot_index if c in cbm.columns]
-
-    component_bom_pivot = cbm.pivot_table(
-        index=pivot_index,
-        columns="model_info",
-        values=col("component_qty"),
-        aggfunc="sum"
-    ).reset_index()
-
-    st.dataframe(component_bom_pivot.round(3).fillna(""), use_container_width=True)
-
+            # 🔹 دمج plan_qty بـ Material + Order Type ← يضمن إيجاد الكمية دائماً
+            unit_result = unit_result.merge(
+                plan_qty_map,
+                left_on=[col("material"), "Order Type"],
+                right_on=[col("material"), col("order_type")],
+                how="left",
+                suffixes=("", "_plan")
+            )
+            # 🔹 دمج material_desc الصحيح (يُستخدم في رأس العمود فقط)
+            if col("material_desc") in unit_result.columns:
+                unit_result.drop(columns=[col("material_desc")], inplace=True)
+            unit_result = unit_result.merge(
+                mat_desc_map,
+                on=col("material"),
+                how="left"
+            )
+ 
+            # رأس العمود: كود المنتج , الكمية الفعلية , وصفه (نوع الطلب)
+            unit_result["model_info"] = (
+                unit_result[col("material")].astype(str) + " , " +
+                unit_result["plan_qty"].fillna(0).round(0).astype(int).astype(str) + " , " +
+                unit_result[col("material_desc")].astype(str).fillna("") + " (" +
+                unit_result["Order Type"].astype(str).fillna("") + ")"
+            )
+ 
+            # ✅ نُلغي BOM Level من الـ pivot — نجمع كل المستويات في صف واحد
+            pivot_index = [col("component"), col("component_desc"),
+                           col("mrp_controller"), col("component_uom")]
+            pivot_index = [c for c in pivot_index if c in unit_result.columns]
+ 
+            component_bom_pivot = unit_result.pivot_table(
+                index=pivot_index,
+                columns="model_info",
+                values="Required Component Quantity",
+                aggfunc="sum"
+            ).reset_index()
+            component_bom_pivot.columns.name = None
+ 
+            st.dataframe(component_bom_pivot.round(3).fillna(""), use_container_width=True)
+        else:
+            component_bom_pivot = pd.DataFrame()
+            st.info("لا توجد بيانات لعرضها في جدول النمطي.")
+    else:
+        component_bom_pivot = pd.DataFrame()
+        st.info("لا توجد نتائج BOM لعرض النمطي.")
+ 
     # ==============================================================================
     # H. جدول الكميات الشهرية + الرسم البياني
     # نستخدم plan_df_orig لأن plan_df تم تحويل أعمدة التواريخ فيه إلى نصوص
@@ -873,6 +927,21 @@ with st.spinner("⏳ جاري معالجة البيانات..."):
             ["🔥 مكونات حرجة", crt2, ""],
         ]
 
+    # ── بيانات الكميات الشهرية للـ Summary ──────────────────────────────────
+    monthly_summary_rows = []
+    if date_cols:
+        monthly_summary_rows = [["", "", ""], ["📅 الكميات الشهرية", "", ""]]
+        for _, mrow in pivot_monthly.iterrows():
+            monthly_summary_rows.append([
+                mrow["Month"],
+                int(mrow.get("الإجمالي", 0)),
+                f"E: {int(mrow.get('E',0)):,}  |  L: {int(mrow.get('L',0)):,}"
+            ])
+        e_total = int(pivot_monthly.get("E", pd.Series([0])).sum())
+        l_total = int(pivot_monthly.get("L", pd.Series([0])).sum())
+        grand   = e_total + l_total
+        monthly_summary_rows.append(["الإجمالي الكلي", grand, f"E: {e_total:,}  |  L: {l_total:,}"])
+
     summary_data = [
         ["📌 ملخص نتائج الخطة", "", ""],
         ["موديلات بالخطة", total_models, ""],
@@ -888,6 +957,7 @@ with st.spinner("⏳ جاري معالجة البيانات..."):
         ["", "", ""],
         ["📈 إحصائيات التغطية", "", ""],
         *coverage_stats_export,
+        *monthly_summary_rows,
         ["", "", ""],
         ["تاريخ الإنشاء", datetime.datetime.now().strftime("%Y-%m-%d %H:%M"), ""],
     ]
@@ -899,42 +969,127 @@ with st.spinner("⏳ جاري معالجة البيانات..."):
         c.strftime("%d %b") if isinstance(c, (datetime.datetime, pd.Timestamp)) else c
         for c in plan_df_export.columns
     ]
-
     # ==============================================================================
-    # J. تصدير Excel
+    # J. تصدير Excel — مع اختيار المستخدم للأوراق ولـ MRP Controller
     # ==============================================================================
     st.markdown("---")
+    st.subheader("📤 تصدير النتائج إلى Excel")
+
+    # ── 1. اختيار MRP Controller (يؤثر على كل الأوراق التي تحتوي العمود) ──
+    mrp_controller_col = col("mrp_controller")   # "MRP Controller"
+    if not mrp_df.empty and mrp_controller_col in mrp_df.columns:
+        mrp_options = sorted(mrp_df[mrp_controller_col].dropna().unique().tolist())
+    elif not result_df.empty and mrp_controller_col in result_df.columns:
+        mrp_options = sorted(result_df[mrp_controller_col].dropna().unique().tolist())
+    else:
+        mrp_options = []
+
+    if mrp_options:
+        # عنوان كبير وأزرق وبولد
+        st.markdown(
+            '<p style="font-size:18px; color:blue; font-weight:bold;">👤 اختر MRP Controller المراد تصديرهم (يُطبَّق على جميع الأوراق التي تحتوي العمود):</p>',
+            unsafe_allow_html=True
+        )
+
+        # Multiselect بدون Label لأنه موجود في الـ HTML أعلاه
+        selected_mrp = st.multiselect(
+            "",
+            options=mrp_options,
+            default=mrp_options
+        )
+    else:
+        selected_mrp = []
+
+    # ── 2. تعريف الأوراق المتاحة ──────────────────────────────────────────
+    available_sheets = {
+        "📋 الخطة الأصلية (Original_Plan)":        ("Original_Plan",           True),
+        "📌 الملخص (Summary)":                     ("Summary",                 True),
+        "📅 الاحتياج بالتاريخ (Need_By_Date)":      ("Need_By_Date",            not result_df.empty),
+        "📦 الاحتياج بنوع الأمر (Need_By_Order)":   ("Need_By_Order_Type",      not result_df.empty),
+        "🔍 تحليل التغطية (Stock_Coverage)":        ("Stock_Coverage_Analysis", not result_df.empty),
+        "🌳 BOM الكامل (BOM_All_Levels)":           ("BOM_All_Levels",          not result_df.empty),
+        "📊 النمطي لكل منتج (Component_in_BOMs)":   ("Component_in_BOMs",       not component_bom_pivot.empty),
+        "🗂️ المكونات الأصلية (Original_Component)": ("Original_Component",      True),
+    }
+
+    # أوراق مفعّلة افتراضيًا
+    default_checked = {"Original_Plan", "Need_By_Date", "Component_in_BOMs"}
+
+    # ── 3. Checkboxes في عمودين ───────────────────────────────────────────
+    st.markdown(
+        '<h1 style="font-size:32px; color:blue; font-weight:bold;">اختر الأوراق التي تريد تصديرها:</h1>',
+        unsafe_allow_html=True
+    )
+
+    col1, col2 = st.columns(2)
+    selected_sheets = {}
+    sheet_items = list(available_sheets.items())
+    for i, (label, (sheet_name, available)) in enumerate(sheet_items):
+        target_col = col1 if i % 2 == 0 else col2
+        with target_col:
+            if available:
+                selected_sheets[sheet_name] = st.checkbox(
+                    label,
+                    value=(sheet_name in default_checked),
+                    key=f"sheet_{sheet_name}"
+                )
+            else:
+                st.checkbox(
+                    label + " *(غير متاح)*",
+                    value=False,
+                    disabled=True,
+                    key=f"sheet_{sheet_name}_dis"
+                )
+
+
+
+
+
+    # ── 4. زر التصدير ────────────────────────────────────────────────────
     if st.button("🗜️ اضغط هنا لإنشاء النسخة الكاملة"):
-        with st.spinner("⏳ جاري إنشاء ملف Excel..."):
-            current_date = datetime.datetime.now().strftime("%d_%b_%Y")
-            excel_buffer = BytesIO()
+        chosen = [k for k, v in selected_sheets.items() if v]
+        if not chosen:
+            st.warning("⚠️ لم تختر أي ورقة للتصدير.")
+        else:
+            with st.spinner("⏳ جاري إنشاء ملف Excel..."):
+                current_date = datetime.datetime.now().strftime("%d_%b_%Y")
+                excel_buffer = BytesIO()
 
-            with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
-                plan_df_export.to_excel(writer, sheet_name="Original_Plan", index=False)
-                summary_df.to_excel(writer, sheet_name="Summary", index=False)
+                # ── خريطة الأوراق ───────────────────────────────────────
+                sheet_data_map = {
+                    "Original_Plan":           plan_df_export,
+                    "Summary":                 summary_df,
+                    "Need_By_Date":            pivot_by_date          if not result_df.empty        else pd.DataFrame(),
+                    "Need_By_Order_Type":      pivot_by_order         if not result_df.empty        else pd.DataFrame(),
+                    "Stock_Coverage_Analysis": component_analysis     if not result_df.empty        else pd.DataFrame(),
+                    "BOM_All_Levels":          merged_df              if not result_df.empty        else pd.DataFrame(),
+                    "Component_in_BOMs":       component_bom_pivot    if not component_bom_pivot.empty else pd.DataFrame(),
+                    "Original_Component":      component_df_orig,
+                    "MRP_Controller":          mrp_df                 if not mrp_df.empty           else pd.DataFrame(),
+                }
 
-                if not result_df.empty:
-                    pivot_by_date.to_excel(writer, sheet_name="Need_By_Date", index=False)
-                    pivot_by_order.to_excel(writer, sheet_name="Need_By_Order_Type", index=False)
-                    component_analysis.to_excel(writer, sheet_name="Stock_Coverage_Analysis", index=False)
-                    merged_df.to_excel(writer, sheet_name="BOM_All_Levels", index=False)
+                # ── تطبيق فلتر MRP Controller على كل ورقة تحتوي العمود ─
+                if selected_mrp:
+                    for sname, sdf in sheet_data_map.items():
+                        if not sdf.empty and mrp_controller_col in sdf.columns:
+                            sheet_data_map[sname] = sdf[sdf[mrp_controller_col].isin(selected_mrp)]
 
-                component_bom_pivot.to_excel(writer, sheet_name="Component_in_BOMs", index=False)
-                component_df_orig.to_excel(writer, sheet_name="Original_Component", index=False)
+                # ── الكتابة ──────────────────────────────────────────────
+                with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
+                    for sheet_name in chosen:
+                        df_to_write = sheet_data_map.get(sheet_name, pd.DataFrame())
+                        if not df_to_write.empty:
+                            df_to_write.to_excel(writer, sheet_name=sheet_name, index=False)
 
-                if not mrp_df.empty:
-                    mrp_df.to_excel(writer, sheet_name="MRP_Controller", index=False)
-
-            excel_buffer.seek(0)
-
-            st.download_button(
-                label="📊 تحميل ملف Excel الكامل",
-                data=excel_buffer,
-                file_name=f"MRP_Results_{current_date}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
-            st.balloons()
-            st.success("✅ تم إنشاء الملف بنجاح — جميع الشيتات موجودة داخل Excel")
+                excel_buffer.seek(0)
+                st.download_button(
+                    label="📊 تحميل ملف Excel الكامل",
+                    data=excel_buffer,
+                    file_name=f"MRP_Results_{current_date}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
+                st.balloons()
+                st.success(f"✅ تم إنشاء الملف بنجاح — {len(chosen)} ورقة: {', '.join(chosen)}")
 
 # --- التذييل ---
 st.markdown("""
