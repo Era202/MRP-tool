@@ -1234,8 +1234,10 @@ with st.spinner("⏳ جاري معالجة البيانات..."):
         "🔍 تحليل التغطية (Stock_Coverage)":        ("Stock_Coverage_Analysis", not result_df.empty),
         "🌳 BOM الكامل (BOM_All_Levels)":           ("BOM_All_Levels",          not result_df.empty),
         "📊 النمطي لكل منتج (Component_in_BOMs)":   ("Component_in_BOMs",       not component_bom_pivot.empty),
-        "🌿 المسارات الأفقية (BOM_Paths)":          ("BOM_Paths",               not df_bom_paths.empty),
+        "🌿 المسارات الأفقية للمكونات (BOM_Paths)":          ("BOM_Paths",               not df_bom_paths.empty),
         "🗂️ المكونات الأصلية (Original_Component)": ("Original_Component",      True),
+        "👤 MRP Controller":                        ("MRP_Controller",       not mrp_df.empty),
+
     }
 
     # أوراق مفعّلة افتراضيًا
