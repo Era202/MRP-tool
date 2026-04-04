@@ -2,7 +2,7 @@
 # MRP Analysis Tool - Multi-Level BOM Explosion
 # Developed by: Reda Roshdy
 # Fixed & Enhanced by: Claude (Anthropic)
-# Date: Mar-2026
+# Date: 1-Apr-2026
 # =======================================================================
 
 # -------------------------------
@@ -330,6 +330,209 @@ def bom_explosion(plan_melted, component_df):
     ).drop(columns=["_comp_key"], errors="ignore")
 
     return result
+
+# ==============================================================================
+# 3b. دالة BOM Paths — المسارات الأفقية الكاملة لكل مكون
+# ==============================================================================
+# هذه الدالة تقوم بعمل BOM Explosion (تفجير هيكل المنتج)
+# حيث يتم تحويل العلاقة بين Parent و Component
+# إلى مسارات كاملة تبدأ من أعلى مستوى (Root)
+# وتنتهي عند آخر مستوى (Leaf) باستخدام أسلوب الـ Recursion
+# ملاحظة:
+# يتم تطبيق التفجير فقط على الأكواد (Parent)
+# التي تقع ضمن النطاق من 40000000 إلى 499999999
+# يتم إخراج النتائج في شكل DataFrame:
+# - كل صف يمثل مسار كامل داخل الـ BOM
+# - كل مستوى في المسار يتم تمثيله في عمود منفصل (Level_1, Level_2, Level_3, ...)
+# كما يتم إضافة أعمدة موازية للأسماء (Name_1, Name_2, ...)
+# بحيث يكون لكل كود (Level) اسمه المقابل بجانبه مباشرة
+# الشكل النهائي يكون أفقي (أعمدة بجوار بعض):
+# Level_1 | Name_1 | Level_2 | Name_2 | Level_3 | Name_3 | ...
+
+def generate_bom_paths(component_df, plan_df=None):
+    """
+    BOM Paths — تفجير هيكل المنتج وإنشاء مسارات أفقية كاملة
+
+    المدخلات:
+        component_df : DataFrame بعد التحميل والتنظيف من load_and_validate_data
+
+    المخرجات:
+        DataFrame أفقي بالشكل:
+        Level_1 | Name_1                        | Level_2  | Name_2                   | ...
+        40000001| منتج نهائي                    | 50000001 | مكون أ , 2.500 KG        | ...
+
+        - الـ Root (Level_1) لا يحمل كمية (لأنه لا يوجد أب فوقه)
+        - كل مستوى تالٍ: "اسم المكون , الكمية النمطية الوحدة"
+        - الكمية = الكمية التراكمية من الـ Root (حاصل ضرب كل المستويات)
+        - الفاصل بين الاسم والكمية: " , "
+    """
+    from collections import defaultdict
+
+    component_df = component_df.copy()
+
+    # ── 1. تحديد عمود الأب المباشر ─────────────────────────────────────────
+    has_parent_col = col("parent_material") in component_df.columns
+    parent_col = col("parent_material") if has_parent_col else col("material")
+
+    # تنظيف الأكواد من المسافات الزائدة
+    component_df[col("component")]   = component_df[col("component")].astype(str).str.strip()
+    component_df[col("material")]    = component_df[col("material")].astype(str).str.strip()
+    component_df[parent_col]         = component_df[parent_col].astype(str).str.strip()
+
+    # ── 2. بناء قاموس العلاقات ───────────────────────────────────────────────
+    # parent -> [(child, child_name, child_qty, child_uom), ...]
+    # نأخذ أول صف فريد لكل (parent, component) — الكمية النمطية لكل وحدة من الأب
+    uom_col = col("component_uom")
+    qty_col = col("component_qty")
+    desc_col = col("component_desc")
+
+    dedup_cols = [parent_col, col("component")]
+    bom_core = (
+        component_df
+        .drop_duplicates(subset=dedup_cols, keep="first")
+        [[parent_col, col("component"), desc_col, qty_col, uom_col]]
+    )
+
+    # قاموس: parent -> [(child, name, qty, uom), ...]
+    bom_dict = defaultdict(list)
+    for _, row in bom_core.iterrows():
+        parent     = row[parent_col]
+        child      = row[col("component")]
+        child_name = str(row.get(desc_col, "")).strip()
+        child_qty  = float(row.get(qty_col, 1) or 1)
+        child_uom  = str(row.get(uom_col, "")).strip()
+        bom_dict[parent].append((child, child_name, child_qty, child_uom))
+
+    # ── 3. قاموس اسم الـ Root ────────────────────────────────────────────────
+    # الأولوية: plan_df (يحتوي Material Description) ← أكثر دقة للـ Root
+    # الاحتياط: component_df نفسه إذا ظهر الـ Root كمكون في مستوى أعلى
+    root_name_dict = {}
+
+    # أولاً: من component_df — الـ Root قد يظهر كـ component في منتج آخر
+    for _, row in component_df.drop_duplicates(subset=[col("component")]).iterrows():
+        code = str(row[col("component")]).strip()
+        name = str(row.get(col("component_desc"), "")).strip()
+        if code and name:
+            root_name_dict[code] = name
+
+    # ثانياً: من plan_df — المصدر الأصح لأسماء المنتجات النهائية (يُغلّب على السابق)
+    if plan_df is not None:
+        for _, row in plan_df.drop_duplicates(subset=[col("material")]).iterrows():
+            code = str(row[col("material")]).strip()
+            name = str(row.get(col("material_desc"), "")).strip()
+            if code and name:
+                root_name_dict[code] = name
+
+    # ── 4. تحديد الـ Root nodes (40000000 – 499999999) ───────────────────────
+    def is_valid_root(code):
+        try:
+            val = int(str(code).strip())
+            return 40_000_000 <= val <= 499_999_999
+        except ValueError:
+            return False
+
+    all_parents = component_df[parent_col].unique()
+    roots = [p for p in all_parents if is_valid_root(p)]
+
+    # ── 5. الدالة التكرارية ───────────────────────────────────────────────────
+    # كل عنصر في المسار: (code, label)
+    # label للـ Root  = اسم المنتج فقط (بدون كمية)
+    # label للبقية   = "الاسم , الكمية_التراكمية الوحدة"
+    # الكمية التراكمية = حاصل ضرب كميات كل المستويات من الـ Root حتى هذا المكون
+    def build_paths(node, node_label, current_path, visited, cumulative_qty):
+        current_path = current_path + [(node, node_label)]
+
+        if node not in bom_dict:
+            return [current_path]
+
+        all_paths = []
+        for child, child_name, child_qty, child_uom in bom_dict[node]:
+            if child in visited:
+                continue
+
+            # الكمية التراكمية = كمية الأب × كمية هذا المكون لكل وحدة من الأب
+            new_cumulative = cumulative_qty * child_qty
+
+            # تنسيق الكمية: إزالة الأصفار الزائدة مع الحفاظ على 3 أرقام عشرية كحد أقصى
+            qty_str = (
+                f"{new_cumulative:.0f}"
+                if new_cumulative == int(new_cumulative)
+                else f"{new_cumulative:.3f}".rstrip("0")
+            )
+            uom_str = f" {child_uom}" if child_uom else ""
+            child_label = f"{child_name} , {qty_str}{uom_str}"
+
+            child_paths = build_paths(
+                child, child_label, current_path,
+                visited | {node}, new_cumulative
+            )
+            all_paths.extend(child_paths)
+
+        if not all_paths:
+            return [current_path]
+
+        return all_paths
+
+    # ── 6. جمع كل المسارات ───────────────────────────────────────────────────
+    all_paths = []
+    for root in roots:
+        root_label = root_name_dict.get(root, "")
+        paths = build_paths(root, root_label, [], set(), cumulative_qty=1.0)
+        all_paths.extend(paths)
+
+    if not all_paths:
+        return pd.DataFrame()
+
+    # ── 7. تحويل إلى DataFrame أفقي ─────────────────────────────────────────
+    max_depth = max(len(p) for p in all_paths)
+
+    columns = []
+    for i in range(1, max_depth + 1):
+        columns.append(f"Level_{i}")
+        columns.append(f"Name_{i}")
+
+    rows = []
+    for path in all_paths:
+        row = {}
+        for i, (code, label) in enumerate(path, start=1):
+            row[f"Level_{i}"] = code
+            row[f"Name_{i}"]  = label
+        rows.append(row)
+
+    df_paths = pd.DataFrame(rows, columns=columns)
+    df_paths = df_paths.drop_duplicates().reset_index(drop=True)
+
+    # ── 8. عدد الآباء المباشرين الفريدين لكل مكون ────────────────────────────
+    #
+    # المنطق: لكل مكون في أي مستوى → كم أب مختلف يدخل فيه؟
+    # المصدر: bom_core (العلاقات الأصلية قبل بناء المسارات)
+    # مثال:
+    #   خامة جلد → أب: لون أحمر , لون أزرق           → العدد = 2
+    #   لون أحمر  → أب: منتج A فقط                   → العدد = 1
+    #   خيط        → أب: لون أحمر , لون أزرق , كيس    → العدد = 3
+    #
+    # يُحسب مرة واحدة من bom_core ويُطبق على كل عمود Level في df_paths
+
+    # قاموس: component → عدد آبائه الفريدين
+    parent_count = (
+        bom_core
+        .groupby(col("component"))[parent_col]
+        .nunique()
+        .to_dict()
+    )
+
+    # تطبيقه على أول عمود Level يحتوي بيانات (Level_2 في الغالب)
+    # وإضافته كعمود A:A في بداية الجدول
+    # نختار Level_2 لأنه المكون المباشر الأكثر فائدة للتحليل
+    if "Level_2" in df_paths.columns:
+        df_paths.insert(
+            0, "عدد آباء المكون المباشر",
+            df_paths["Level_2"].astype(str).str.strip().map(parent_count).fillna(1).astype(int)
+        )
+    else:
+        df_paths.insert(0, "عدد آباء المكون المباشر", 1)
+
+    return df_paths
 
 # ==============================================================================
 # 4. واجهة المستخدم
@@ -842,6 +1045,28 @@ with st.spinner("⏳ جاري معالجة البيانات..."):
         st.info("لا توجد نتائج BOM لعرض النمطي.")
  
     # ==============================================================================
+    # G2. المسارات الأفقية الكاملة للـ BOM (BOM Horizontal Paths)
+    # ==============================================================================
+    st.markdown("---")
+    st.subheader("🌿 المسارات الكاملة للـ BOM — عرض أفقي (BOM Paths)")
+    st.caption(
+        "كل صف يمثل مسار كامل داخل هيكل المنتج من الـ Root حتى الـ Leaf. "
+        "يتم تمثيل كل مستوى بعمودين: الكود (Level_N) واسمه (Name_N) بجانبه مباشرة."
+    )
+
+    df_bom_paths = generate_bom_paths(component_df, plan_df)
+
+    if df_bom_paths.empty:
+        st.warning("⚠️ لا توجد مسارات — تحقق من نطاق الكودات (40000000–499999999) أو بيانات الـ BOM.")
+    else:
+        max_level_found = len([c for c in df_bom_paths.columns if c.startswith("Level_")])
+        st.success(
+            f"✅ تم إنشاء **{len(df_bom_paths):,}** مسار كامل | "
+            f"أقصى عمق هرمي: **{max_level_found}** مستويات"
+        )
+        st.dataframe(df_bom_paths, use_container_width=True, hide_index=True)
+
+    # ==============================================================================
     # H. جدول الكميات الشهرية + الرسم البياني
     # نستخدم plan_df_orig لأن plan_df تم تحويل أعمدة التواريخ فيه إلى نصوص
     # ==============================================================================
@@ -1009,6 +1234,7 @@ with st.spinner("⏳ جاري معالجة البيانات..."):
         "🔍 تحليل التغطية (Stock_Coverage)":        ("Stock_Coverage_Analysis", not result_df.empty),
         "🌳 BOM الكامل (BOM_All_Levels)":           ("BOM_All_Levels",          not result_df.empty),
         "📊 النمطي لكل منتج (Component_in_BOMs)":   ("Component_in_BOMs",       not component_bom_pivot.empty),
+        "🌿 المسارات الأفقية (BOM_Paths)":          ("BOM_Paths",               not df_bom_paths.empty),
         "🗂️ المكونات الأصلية (Original_Component)": ("Original_Component",      True),
     }
 
@@ -1064,6 +1290,7 @@ with st.spinner("⏳ جاري معالجة البيانات..."):
                     "Stock_Coverage_Analysis": component_analysis     if not result_df.empty        else pd.DataFrame(),
                     "BOM_All_Levels":          merged_df              if not result_df.empty        else pd.DataFrame(),
                     "Component_in_BOMs":       component_bom_pivot    if not component_bom_pivot.empty else pd.DataFrame(),
+                    "BOM_Paths":               df_bom_paths           if not df_bom_paths.empty     else pd.DataFrame(),
                     "Original_Component":      component_df_orig,
                     "MRP_Controller":          mrp_df                 if not mrp_df.empty           else pd.DataFrame(),
                 }
